@@ -2096,9 +2096,22 @@
       var _this = this
 
       Notifier.sendWebhook(config.webhookUrl, message).then(function () {
-        _this.showMessage('推送成功（' + selected.length + ' 条隧道）', 'success')
-        /** 更新快照 */
+        var now = new Date()
+        var timeStr = Monitor._formatTime(now)
+        var nextCheck = new Date(now.getTime() + config.interval * 60 * 1000)
+        Monitor.lastCheckTime = timeStr
+        Monitor.lastCheckStatus = '已推送'
+        Monitor.lastPushTime = timeStr
+        Monitor.nextCheckTime = Monitor._formatTime(nextCheck)
         Store.saveLastSent(selected)
+        UI.updateStatus({
+          isRunning: true,
+          lastCheckTime: Monitor.lastCheckTime,
+          lastCheckStatus: Monitor.lastCheckStatus,
+          lastPushTime: Monitor.lastPushTime,
+          nextCheckTime: Monitor.nextCheckTime
+        })
+        _this.showMessage('推送成功（' + selected.length + ' 条隧道）', 'success')
       }).catch(function (err) {
         _this.showMessage('推送失败: ' + err.message, 'error')
       })
@@ -2366,10 +2379,17 @@
       }
 
       Log.log('[Tick]', '监控启动，间隔=' + config.interval + 'min')
-      var now = new Date()
-      var nextCheck = new Date(now.getTime() + config.interval * 60 * 1000)
-      this.nextCheckTime = this._formatTime(nextCheck)
-      UI.updateStatus({ isRunning: true, lastPushTime: null, nextCheckTime: this.nextCheckTime })
+
+      /** 自动恢复时保留上次存储的检测时间，不从当前时间重新计算 */
+      if (immediate === false && this.nextCheckTime) {
+        UI.updateStatus({ isRunning: true, lastPushTime: null, nextCheckTime: this.nextCheckTime })
+      } else {
+        var now = new Date()
+        var nextCheck = new Date(now.getTime() + config.interval * 60 * 1000)
+        this.nextCheckTime = this._formatTime(nextCheck)
+        UI.updateStatus({ isRunning: true, lastPushTime: null, nextCheckTime: this.nextCheckTime })
+      }
+
       UI.showMessage('监控已启动，每 ' + config.interval + ' 分钟检查一次', 'success')
     },
 
