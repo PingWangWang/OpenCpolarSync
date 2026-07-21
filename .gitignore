@@ -1,2 +1,8 @@
 # 忽略 Openlist 数据目录（配置、数据库、日志、临时文件）
 Openlist/data/
+
+# 忽略 Openlist 大文件（通过发布包单独分发）
+Openlist/*.exe
+Openlist/*.zip
+Openlist/*.7z
+Openlist/*.tar.gz
