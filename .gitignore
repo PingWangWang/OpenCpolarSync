@@ -1,0 +1,2 @@
+# 忽略 Openlist 数据目录（配置、数据库、日志、临时文件）
+Openlist/data/
