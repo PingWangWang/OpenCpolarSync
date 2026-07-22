@@ -1,128 +1,157 @@
 # Cpolar 隧道状态同步
 
-> 自动监控 Cpolar 在线隧道状态，变更时通过钉钉 Webhook 推送通知
+> 自动监控 Cpolar 在线隧道状态，变更时通过钉钉 Webhook 推送通知 — **无需浏览器，常驻守护**
 
-[![Tampermonkey](https://img.shields.io/badge/Tampermonkey-✓-brightgreen)](https://www.tampermonkey.net/)
 [![License](https://img.shields.io/badge/License-MIT-blue)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.1.0-orange)](cpolar-sync.user.js)
+[![Version](https://img.shields.io/badge/version-2.0-orange)](CpolarGuard.ps1)
+[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)]()
 
 ## ✨ 功能特性
 
-- **定时监控** — 按可配置的间隔（最小 5 分钟）自动轮询 Cpolar 在线隧道列表
+- **独立运行** — 不依赖 Tampermonkey / 浏览器，PowerShell 常驻守护脚本
+- **定时监控** — 按可配置的间隔（最小 1 分钟）轮询 Cpolar 后端 API
 - **变更推送** — 检测到隧道新增、信息变更、离线时，通过钉钉 Webhook 发送 Markdown 通知
-- **手动发送** — 支持一键预览推送内容、立即强制发送当前勾选的隧道
 - **智能去重** — 对比上次推送快照，数据无变化时不重复发送
-- **状态记忆** — 刷新页面或关闭浏览器后，恢复上次监控状态和检测记录
-- **调试日志** — 内置控制台调试输出，支持运行时开关，方便排查问题
-- **路由自适应** — 仅在 `#/status/online` 页面显示配置栏，登录页自动隐藏
+- **日志轮转** — 日志文件按 ISO 周编号归档，保留最近 4 周
+- **开机自启** — 通过 AutoStart.bat 一键注册 shell:startup 快捷方式
 
 ## 📦 安装
 
 ### 前置条件
 
-- 浏览器已安装 [Tampermonkey](https://www.tampermonkey.net/) 或 [Violentmonkey](https://violentmonkey.github.io/)
+- Windows 系统，PowerShell 5.0+
 - 拥有 Cpolar Web 管理界面访问权限（`http://localhost:9200`）
 - 已创建钉钉机器人并获取 Webhook URL
 
-### 安装脚本
-
-1. 打开 `cpolar-sync.user.js` 文件，复制全部代码
-2. 在 Tampermonkey 中创建新脚本，粘贴代码并保存
-3. 访问 `http://localhost:9200/#/status/online`，登录后即可看到配置栏
-
-或直接通过 URL 安装（如已部署到服务器）：
+### 目录结构
 
 ```
-https://your-server.com/cpolar-sync.user.js
+Cpolar/
+├── CpolarGuard.ps1          # 常驻守护脚本
+├── AutoStart.bat            # 开机自启管理
+├── config/
+│   ├── config.json          # 用户配置
+│   └── last-sent.json       # 上次推送隧道快照（自动维护）
+├── logs/
+│   └── guard.log            # 运行日志（自动轮转）
+├── archive/                 # 旧版文件（保留参考）
+│   ├── cpolar-sync.user.js
+│   └── api_list.txt
+├── installer/               # Cpolar 安装包
+│   └── cpolar_amd64.msi
+└── README.md
 ```
 
 ## 🚀 快速开始
 
-### 1. 配置 Webhook
+### 1. 获取 API Token
 
-在 Cpolar 在线隧道列表页面，脚本配置栏中填写钉钉机器人 Webhook URL：
+CpolarGuard 通过调用 Cpolar 后端 API 获取隧道列表，需要从浏览器中复制登录后的 Cookie 值：
 
+1. 打开浏览器，登录 Cpolar Web 管理界面（`http://localhost:9200`）
+2. 按 `F12` 打开开发者工具 → **Application** → **Cookies** → `http://localhost:9200`
+3. 找到名为 `vue_admin_template_token` 的 Cookie，复制其 **Value**
+4. 粘贴到 `config/config.json` 的 `"token"` 字段
+
+### 2. 配置 Webhook
+
+编辑 `config/config.json`，填写钉钉机器人 Webhook URL：
+
+```json
+{
+  "webhookUrl": "https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxx",
+  "interval": 5,
+  "selectedTunnelNames": [],
+  "token": "eyJhbGciOiJIUzI1NiIs..."
+}
 ```
-https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxx
-```
-
-### 2. 勾选要监控的隧道
-
-点击 **🔄 扫描隧道** 刷新列表，勾选需要监控的隧道。
 
 ### 3. 启动监控
 
-点击 **▶ 启动监控**，脚本将按设定间隔自动检测隧道状态变更。
-
-### 4. 测试推送
-
-点击 **👁 预览信息** 查看推送内容，点击 **📤 立即发送** 手动推送测试。
-
-## 🧭 界面说明
-
+```powershell
+# 在 Cpolar 目录下执行
+powershell -ExecutionPolicy Bypass -File CpolarGuard.ps1
 ```
-┌──────────────────────────────────────────────────────────┐
-│ 📡 Cpolar 隧道状态同步                                    │
-├──────────────────────────────────────────────────────────┤
-│ Webhook URL  [______________________________]            │
-│ 刷新间隔      [5] 分钟                                    │
-│ [💾 保存配置] [🔄 扫描隧道] [👁 预览信息] [📤 立即发送]    │
-│ [▶ 启动监控] [🔍 调试日志]                                 │
-├──────────────────────────────────────────────────────────┤
-│ 监控隧道（勾选需要推送的隧道）                              │
-│ ☑ 隧道A  http  http://xxx.cpolar.top  http://127.0.0.1   │
-│ ☑ 隧道A  https https://xxx.cpolar.top  http://127.0.0.1  │
-├──────────────────────────────────────────────────────────┤
-│ ┌──────────┬──────────┬──────────┬──────────┬──────────┐ │
-│ │当前状态  │上次检测  │上次推送  │检测结果  │下次检测  │ │
-│ ├──────────┼──────────┼──────────┼──────────┼──────────┤ │
-│ │● 运行中  │ 14:30:15 │ 14:30:15 │ 已推送   │ 14:35:15 │ │
-│ └──────────┴──────────┴──────────┴──────────┴──────────┘ │
-│ 调试日志：已开启                                           │
-└──────────────────────────────────────────────────────────┘
+
+或通过 `AutoStart.bat` 设置开机自启，重启后自动运行。
+
+### 4. 配置勾选隧道（可选）
+
+`config.json` 中的 `selectedTunnelNames` 用于过滤需要监控的隧道，填入隧道名称即可，例如：
+
+```json
+"selectedTunnelNames": ["OpenListHC", "我的网站"]
 ```
+
+留空则监控所有隧道。
 
 ## 🔧 配置项
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| Webhook URL | 钉钉机器人 Webhook 地址 | 空 |
-| 刷新间隔 | 自动检测间隔（分钟） | 5 分钟 |
-| 勾选的隧道 | 需要监控推送的隧道列表 | 空 |
-| 调试日志 | 控制台调试输出开关 | 关闭 |
+| `webhookUrl` | 钉钉机器人 Webhook 地址 | `""` |
+| `interval` | 自动检测间隔（分钟） | `1` |
+| `selectedTunnelNames` | 需要监控的隧道名称列表（留空=全部） | `[]` |
+| `cpolarApiBase` | Cpolar Web 地址 | `http://localhost:9200` |
+| `token` | JWT Token（从浏览器 DevTools → Local Storage 复制） | `""` |
+| `debug` | 调试日志输出开关 | `false` |
 
-## 🛠️ 开发
+## 🧠 架构说明
 
-### 技术栈
+```
+CpolarGuard.ps1
+  │
+  ├─ 读取 config/config.json
+  ├─ 无限循环：
+  │   ├─ GET /api/v1/tunnels?token=xxx   ← 调用 Cpolar 后端 API
+  │   ├─ 筛选已勾选隧道
+  │   ├─ 检测变更（新增/更新/离线）
+  │   ├─ 有变更 → POST 钉钉 Webhook
+  │   └─ Start-Sleep 等待下一周期
+  └─ 日志轮转（保留最近 4 周）
+```
 
-- 原生 JavaScript（ES5 兼容）
-- Tampermonkey `GM_*` API
-- 钉钉机器人 Webhook（Markdown 消息）
+**对比旧版 Tampermonkey 油猴脚本：**
 
-### 本地调试
+| 维度 | 旧版（油猴脚本） | 新版（PowerShell 守护） |
+|------|:---:|:---:|
+| 依赖浏览器 | ✅ 必须 | ❌ 不需要 |
+| 依赖 Tampermonkey | ✅ 必须 | ❌ 不需要 |
+| 数据源 | DOM 解析（Vue SPA） | REST API（JSON） |
+| 常驻运行 | 浏览器页面打开时 | 后台进程常驻 |
+| 崩溃恢复 | 页面刷新后重连 | AutoStart.bat 守护 |
+| 日志记录 | 浏览器控制台 | 文件日志 + 周轮转 |
 
-1. 在 Tampermonkey 中启用脚本
-2. 开启 **🔍 调试日志**（或调用 `cpolarSyncDebug(true)`）
-3. 打开浏览器开发者工具 Console，过滤 `[CpolarSync]` 查看日志
+## 🛠️ 手动运行与调试
 
-### 控制台调试接口
+### 前台运行（调试模式）
 
-```js
-cpolarSyncDebug(true)          // 开启调试日志
-cpolarSyncDebug(false)         // 关闭调试日志
-cpolarSyncDebug()              // 查看当前状态
-cpolarSyncDebug.layout()       // 输出页面布局诊断
+```powershell
+powershell -ExecutionPolicy Bypass -File CpolarGuard.ps1
+```
+
+窗口保持可见，日志同时输出到控制台和 `logs/guard.log`。
+
+### 后台运行（隐藏窗口）
+
+脚本启动后自动隐藏控制台窗口（通过 `Add-Type` + `ShowWindow` 实现）。
+如需在前台运行，注释掉脚本开头的窗口隐藏代码。
+
+### 查看日志
+
+```powershell
+# 实时查看
+Get-Content .\logs\guard.log -Tail 20 -Wait
+
+# 查看历史归档
+Get-ChildItem .\logs\guard.log.*
 ```
 
 ## ❓ 适用场景
 
 - **Cpolar 用户** — 需要实时获知隧道状态变更（新增/离线/信息更新）
 - **团队协作** — 通过钉钉群机器人推送隧道状态，多人同步
-- **自动化运维** — 定时监控隧道可用性，异常时自动告警
-
-## 🤝 贡献
-
-欢迎提交 Issue 或 Pull Request。
+- **自动化运维** — 无需打开浏览器，服务器后台长期运行
 
 ## 📝 License
 

@@ -1,0 +1,25 @@
+{
+  "_webhookUrl": "钉钉机器人 Webhook 地址（必填），在钉钉群 → 智能群助手 → 添加机器人 → 复制 Webhook URL",
+  "webhookUrl": "",
+
+  "_interval": "轮询检测间隔，单位分钟，最小 1 分钟",
+  "interval": 1,
+
+  "_selectedTunnelNames": "要监控的隧道名称列表，如 [\"OpenListHC\"]。留空 [] 则不监控任何隧道，运行中修改此文件会自动生效",
+  "selectedTunnelNames": [],
+
+  "_cpolarApiBase": "Cpolar Web 管理界面地址，一般不需要改",
+  "cpolarApiBase": "http://localhost:9200",
+
+  "_username": "Cpolar Web 登录邮箱",
+  "username": "",
+
+  "_password": "Cpolar Web 登录密码",
+  "password": "",
+
+  "_keyword": "钉钉机器人安全关键词，需在钉钉群机器人安全设置中添加同名字符串",
+  "keyword": "Cpolar",
+
+  "_debug": "调试日志开关，true=输出详细 API 响应和运行日志",
+  "debug": true
+}
