@@ -219,59 +219,47 @@ function Login-Cpolar {
 
     $loginUrl = "$($Config.cpolarApiBase)/api/v1/user/login"
 
-    # Try different field combinations since Cpolar may use email as login name
-    $loginAttempts = @(
-        @{ username = $Config.username; password = $Config.password },
-        @{ email    = $Config.username; password = $Config.password },
-        @{ account  = $Config.username; password = $Config.password }
-    )
+    # Login with email + password (Cpolar Web uses email as login name)
+    $bodyObj = @{ email = $Config.username; password = $Config.password }
+    $body = $bodyObj | ConvertTo-Json
 
-    foreach ($bodyObj in $loginAttempts) {
-        $body = $bodyObj | ConvertTo-Json
-        Write-GuardLog -Level "INFO" -Message "Attempting login with fields: $($bodyObj.Keys -join ', ')"
+    Write-GuardLog -Level "INFO" -Message "Logging in with email"
 
-        try {
-            $response = Invoke-RestMethod -Uri $loginUrl `
-                -Method Post `
-                -ContentType "application/json;charset=utf-8" `
-                -Body $body `
-                -TimeoutSec 15 `
-                -UseBasicParsing `
-                -ErrorAction Stop
+    try {
+        $response = Invoke-RestMethod -Uri $loginUrl `
+            -Method Post `
+            -ContentType "application/json;charset=utf-8" `
+            -Body $body `
+            -TimeoutSec 15 `
+            -UseBasicParsing `
+            -ErrorAction Stop
 
-            # Check for token in various response formats
-            $token = $null
-            if ($response.code -eq 0 -and $response.data -and $response.data.token) {
-                $token = $response.data.token
-            } elseif ($response.data -and $response.data.token) {
-                $token = $response.data.token
-            } elseif ($response.token) {
-                $token = $response.token
-            }
-
-            if ($token) {
-                Write-GuardLog -Level "INFO" -Message "Login successful"
-                return $token
-            }
-
-            # If response has code but no token, log and try next format
-            if ($response.code) {
-                Write-GuardLog -Level "INFO" -Message "Login responded: code=$($response.code) msg=$($response.message)"
-            } else {
-                Write-GuardLog -Level "INFO" -Message "Login responded: $($response | ConvertTo-Json -Compress)"
-            }
-        } catch {
-            $statusCode = $_.Exception.Response.StatusCode.value__
-            try {
-                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-                $errBody = $reader.ReadToEnd()
-                $reader.Close()
-            } catch { $errBody = "(无法读取)" }
-            Write-GuardLog -Level "INFO" -Message "Login attempt failed: $statusCode - $errBody"
+        # Check for token in various response formats
+        $token = $null
+        if ($response.code -eq 0 -and $response.data -and $response.data.token) {
+            $token = $response.data.token
+        } elseif ($response.data -and $response.data.token) {
+            $token = $response.data.token
+        } elseif ($response.token) {
+            $token = $response.token
         }
+
+        if ($token) {
+            Write-GuardLog -Level "INFO" -Message "Login successful"
+            return $token
+        }
+
+        Write-GuardLog -Level "ERROR" -Message "Login failed: code=$($response.code) msg=$($response.message)"
+    } catch {
+        $statusCode = $_.Exception.Response.StatusCode.value__
+        try {
+            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+            $errBody = $reader.ReadToEnd()
+            $reader.Close()
+        } catch { $errBody = "(无法读取)" }
+        Write-GuardLog -Level "ERROR" -Message "Login failed: $statusCode - $errBody"
     }
 
-    Write-GuardLog -Level "ERROR" -Message "所有登录方式均失败"
     return $null
 }
 
@@ -723,8 +711,8 @@ while ($true) {
     # 1. Fetch tunnels from Cpolar API
     # --------------------------------------------------------
     $tunnels = Fetch-Tunnels -Config $config
-    if (-not $tunnels) {
-        Write-GuardLog -Level "WARN" -Message "No tunnel data fetched (check token or Cpolar Web). Will retry."
+    if ($null -eq $tunnels) {
+        Write-GuardLog -Level "WARN" -Message "获取隧道数据失败（检查 token 或 Cpolar Web 是否运行），将在下一周期重试"
         Start-Sleep -Seconds $global:pollInterval
         continue
     }
