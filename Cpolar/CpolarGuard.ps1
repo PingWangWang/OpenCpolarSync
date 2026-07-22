@@ -467,9 +467,8 @@ function Detect-TunnelChanges {
 # ============================================================
 function Test-TunnelEqual {
     param($a, $b)
-    # Only compare essential fields: name, protocol, publicUrl, localAddr
-    # Intentionally excludes createTime (changes on restart) and status (transient)
-    $fields = @('name', 'protocol', 'publicUrl', 'localAddr')
+    # Compare essential fields: name, protocol, publicUrl, localAddr, status
+    $fields = @('name', 'protocol', 'publicUrl', 'localAddr', 'status')
     foreach ($f in $fields) {
         $va = if ($a.$f) { $a.$f } else { "" }
         $vb = if ($b.$f) { $b.$f } else { "" }
@@ -722,7 +721,7 @@ while ($true) {
     # --------------------------------------------------------
     # 2. Filter to selected tunnels
     # --------------------------------------------------------
-    $selectedTunnels = Filter-SelectedTunnels -Tunnels $tunnels -SelectedIds $config.selectedTunnelNames
+    $selectedTunnels = Filter-SelectedTunnels -Tunnels $tunnels -SelectedNames $config.selectedTunnelNames
     if ($selectedTunnels.Count -eq 0) {
         Write-GuardLog -Level "CHECK" -Message "未勾选隧道，跳过推送"
         $global:lastData = $selectedTunnels
