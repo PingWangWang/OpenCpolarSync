@@ -1,9 +1,8 @@
 @echo off
-chcp 65001 >nul
 cd /d "%~dp0"
 
-if not exist "AutoStart.vbs" (
-    echo Error: AutoStart.vbs not found. Please run this script from the Openlist directory.
+if not exist "OpenlistGuard.ps1" (
+    echo Error: OpenlistGuard.ps1 not found. Please run this script from the Openlist directory.
     pause
     exit /b 1
 )
@@ -16,12 +15,14 @@ if "%STARTUP%"=="" (
     exit /b 1
 )
 
-set "LNK=%STARTUP%\OpenList 文件管理.lnk"
-set "TARGET=%~dp0AutoStart.vbs"
+set "LNK=%STARTUP%\OpenlistGuard.lnk"
+set "TARGET=%~dp0OpenlistGuard.ps1"
 set "WORKDIR=%~dp0"
 
-:: Create shortcut via PowerShell (single command, no temp file — avoids encoding issues with Chinese chars)
-powershell -ExecutionPolicy Bypass -Command "& {$ws=New-Object -ComObject WScript.Shell; $lnk=$ws.CreateShortcut('%LNK%'); $lnk.TargetPath='%TARGET%'; $lnk.WorkingDirectory='%WORKDIR%'; $lnk.Description='OpenList File Management Service'; $lnk.Save()}"
+:: Create shortcut via PowerShell
+:: Note: keep arguments minimal to avoid AV behavior detection.
+:: Window hiding is handled internally by OpenlistGuard.ps1 via Add-Type + ShowWindow.
+powershell -ExecutionPolicy Bypass -Command "& {$ws=New-Object -ComObject WScript.Shell; $lnk=$ws.CreateShortcut('%LNK%'); $lnk.TargetPath='powershell.exe'; $lnk.Arguments='-ExecutionPolicy Bypass -File ""%TARGET%""'; $lnk.WorkingDirectory='%WORKDIR%'; $lnk.Description='OpenList File Management Service (Guard)'; $lnk.Save()}"
 
 if exist "%LNK%" (
     echo Startup shortcut created successfully!

@@ -9,7 +9,7 @@ if "%STARTUP%"=="" (
     exit /b 1
 )
 
-set "LNK=%STARTUP%\OpenList 文件管理.lnk"
+set "LNK=%STARTUP%\OpenlistGuard.lnk"
 
 if not exist "%LNK%" (
     echo Startup shortcut not found, nothing to remove.

@@ -1,6 +1,10 @@
 # 忽略 Openlist 数据目录（配置、数据库、日志、临时文件）
 Openlist/data/
 
+# 忽略 Openlist 守护日志（按周轮转归档，不纳入版本控制）
+Openlist/guard.log
+Openlist/guard.log.*
+
 # 忽略 Openlist 大文件（通过发布包单独分发）
 Openlist/*.exe
 Openlist/*.zip
