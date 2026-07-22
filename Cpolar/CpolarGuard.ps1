@@ -749,14 +749,24 @@ while ($true) {
     if ($diff.hasChanges) {
         Write-GuardLog -Level "INFO" -Message "变更检测: $($diff.added.Count) 新增, $($diff.updated.Count) 更新, $($diff.reconnected.Count) 重新上线, $($diff.removed.Count) 离线"
 
-        $message = Build-DingTalkMessage -DiffResult $diff -Keyword $config.keyword
-        $success = Send-DingTalkWebhook -WebhookUrl $config.webhookUrl -MessageBody $message
+        # 数据完整性检查：等待 Cpolar API 数据稳定后再推送
+        # 排除离线隧道（removed），它们没有新数据是正常的
+        $allOnChanged = $diff.added + $diff.updated + $diff.reconnected
+        $incompleteTunnels = $allOnChanged | Where-Object { -not $_.protocol -or -not $_.publicUrl }
 
-        if ($success) {
-            Save-LastSent -Tunnels $selectedTunnels
-            Write-GuardLog -Level "INFO" -Message "推送完成"
+        if ($incompleteTunnels) {
+            $names = ($incompleteTunnels | ForEach-Object { $_.name }) -join ", "
+            Write-GuardLog -Level "WARN" -Message "隧道 [$names] 数据不完整（缺少协议或公网地址），Cpolar API 数据尚未就绪，本轮跳过推送，下一轮重试"
         } else {
-            Write-GuardLog -Level "WARN" -Message "推送失败，下次重试时重新检测"
+            $message = Build-DingTalkMessage -DiffResult $diff -Keyword $config.keyword
+            $success = Send-DingTalkWebhook -WebhookUrl $config.webhookUrl -MessageBody $message
+
+            if ($success) {
+                Save-LastSent -Tunnels $selectedTunnels
+                Write-GuardLog -Level "INFO" -Message "推送完成"
+            } else {
+                Write-GuardLog -Level "WARN" -Message "推送失败，下次重试时重新检测"
+            }
         }
     } else {
         Write-GuardLog -Level "CHECK" -Message "无变更，已跳过推送"
