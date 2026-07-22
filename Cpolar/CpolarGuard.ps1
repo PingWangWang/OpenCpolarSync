@@ -426,6 +426,9 @@ function Detect-TunnelChanges {
             # 状态变为 inactive → 归入离线
             if ($newMap[$name].status -eq "inactive") {
                 $removed += $newMap[$name]
+            } elseif ($oldMap[$name].status -eq "inactive") {
+                # 从 inactive 恢复 → 归入重新上线
+                $reconnected += $newMap[$name]
             } else {
                 $updated += $newMap[$name]
             }
