@@ -16,6 +16,33 @@
 | `OpenlistGuard.ps1` | 常驻守护脚本，60 秒轮询监控进程崩溃自动重启，日志按 ISO 周轮转归档 | - |
 | `AutoStart.bat` | 交互式菜单，添加/删除开机自启（UAC 提权 + shell:startup 快捷方式） | UAC 提权 |
 
+## 📦 安装
+
+### 前置条件
+
+- Windows 系统，PowerShell 5.0+
+
+### 安装 openlist.exe
+
+`openlist.exe` 不纳入 Git 版本管理（文件较大），需手动部署：
+
+1. 进入 `archive/` 目录，找到 `openlist.zip`
+2. 解压 `openlist.zip`，得到 `openlist.exe`
+3. 将 `openlist.exe` 放到 `Openlist/` 目录（与 `OpenlistGuard.ps1` 同目录）
+
+目录结构如下：
+
+```
+Openlist/
+├── OpenlistGuard.ps1         # 守护脚本
+├── AutoStart.bat             # 自启管理
+├── openlist.exe              # 👈 手动放置（从 archive/openlist.zip 解压）
+├── archive/
+│   └── openlist.zip          # 发布包
+├── data/                     # 运行时自动创建
+└── logs/                     # 守护日志自动生成
+```
+
 ## 守护方案（OpenlistGuard）
 
 `OpenlistGuard.ps1` 替代了旧版一次性启动脚本，提供进程崩溃自动恢复能力：
@@ -68,14 +95,16 @@ AutoStart.bat
 Openlist/
 +-- OpenlistGuard.ps1         # 常驻守护脚本（60秒轮询 + 自动重启）
 +-- AutoStart.bat             # 开机自启管理（添加/删除）
-+-- openlist.exe              # 文件管理服务程序
-+-- openlist.zip              # 发布压缩包
++-- bin/
+|   +-- openlist.exe          # 文件管理服务程序
++-- archive/
+|   +-- openlist.zip          # 发布压缩包
 +-- data/
 |   +-- config.json           # 服务配置
 |   +-- data.db               # SQLite 数据库
 |   +-- log/log.log           # 运行日志
 |   +-- temp/                 # 临时文件目录
-+-- guard-*.log               # OpenlistGuard 运行日志（自动轮转）
++-- logs/                     # 守护脚本日志（自动轮转）
 +-- README.md
 ```
 

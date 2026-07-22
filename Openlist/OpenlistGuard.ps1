@@ -54,7 +54,7 @@ if (-not $scriptDir) {
 }
 
 $exePath    = Join-Path -Path $scriptDir -ChildPath "openlist.exe"
-$logFile    = Join-Path -Path $scriptDir -ChildPath "guard.log"
+$logFile    = Join-Path -Path $scriptDir -ChildPath "logs/guard.log"
 $processName = "openlist"         # Process name without .exe extension
 
 $pollIntervalSec  = 60             # Poll interval (seconds)
@@ -132,7 +132,7 @@ function Initialize-GuardLog {
 
     # Purge archives older than 4 weeks
     $retentionWeeks = 4
-    Get-ChildItem -Path $scriptDir -Filter "guard.log.*" | ForEach-Object {
+    Get-ChildItem -Path (Join-Path $scriptDir "logs") -Filter "guard.log.*" | ForEach-Object {
         if ($_.Name -match 'guard\.log\.(\d{4})-W(\d{2})') {
             $logYear  = [int]$Matches[1]
             $logWeek  = [int]$Matches[2]
