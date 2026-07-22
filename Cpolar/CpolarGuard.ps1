@@ -425,16 +425,19 @@ function Detect-TunnelChanges {
         $newMap.Keys
     }
 
-    $added   = @()
-    $updated = @()
-    $removed = @()
+    $added       = @()
+    $updated     = @()
+    $reconnected = @()
+    $removed     = @()
 
-    # Detect added and updated
+    # Detect added, updated, and reconnected
     foreach ($name in $relevantNewNames) {
         if (-not $oldMap.ContainsKey($name)) {
             $added += $newMap[$name]
         } elseif (-not (Test-TunnelEqual -a $newMap[$name] -b $oldMap[$name])) {
             $updated += $newMap[$name]
+        } elseif ($newMap[$name].createTime -ne $oldMap[$name].createTime) {
+            $reconnected += $newMap[$name]
         }
     }
 
@@ -452,13 +455,14 @@ function Detect-TunnelChanges {
         }
     }
 
-    $hasChanges = ($added.Count -gt 0) -or ($updated.Count -gt 0) -or ($removed.Count -gt 0)
+    $hasChanges = ($added.Count -gt 0) -or ($updated.Count -gt 0) -or ($reconnected.Count -gt 0) -or ($removed.Count -gt 0)
 
     return @{
-        added      = $added
-        updated    = $updated
-        removed    = $removed
-        hasChanges = $hasChanges
+        added       = $added
+        updated     = $updated
+        reconnected = $reconnected
+        removed     = $removed
+        hasChanges  = $hasChanges
     }
 }
 
@@ -540,6 +544,13 @@ function Build-DingTalkMessage {
     if ($DiffResult.updated.Count -gt 0) {
         foreach ($t in $DiffResult.updated) {
             $lines += Format-TunnelEntry -t $t -prefix "🔄" -title "信息变更"
+        }
+    }
+
+    # Reconnected tunnels (only createTime changed — tunnel restarted)
+    if ($DiffResult.reconnected.Count -gt 0) {
+        foreach ($t in $DiffResult.reconnected) {
+            $lines += Format-TunnelEntry -t $t -prefix "🟢" -title "重新上线（隧道重启）"
         }
     }
 
@@ -745,7 +756,7 @@ while ($true) {
     # 4. Push if there are changes
     # --------------------------------------------------------
     if ($diff.hasChanges) {
-        Write-GuardLog -Level "INFO" -Message "变更检测: $($diff.added.Count) 新增, $($diff.updated.Count) 更新, $($diff.removed.Count) 离线"
+        Write-GuardLog -Level "INFO" -Message "变更检测: $($diff.added.Count) 新增, $($diff.updated.Count) 更新, $($diff.reconnected.Count) 重新上线, $($diff.removed.Count) 离线"
 
         $message = Build-DingTalkMessage -DiffResult $diff -Keyword $config.keyword
         $success = Send-DingTalkWebhook -WebhookUrl $config.webhookUrl -MessageBody $message
