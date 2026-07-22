@@ -423,7 +423,12 @@ function Detect-TunnelChanges {
         if (-not $oldMap.ContainsKey($name)) {
             $added += $newMap[$name]
         } elseif (-not (Test-TunnelEqual -a $newMap[$name] -b $oldMap[$name])) {
-            $updated += $newMap[$name]
+            # 状态变为 inactive → 归入离线
+            if ($newMap[$name].status -eq "inactive") {
+                $removed += $newMap[$name]
+            } else {
+                $updated += $newMap[$name]
+            }
         } elseif ($newMap[$name].createTime -ne $oldMap[$name].createTime) {
             $reconnected += $newMap[$name]
         }
