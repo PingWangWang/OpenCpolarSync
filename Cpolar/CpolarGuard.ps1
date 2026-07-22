@@ -733,7 +733,10 @@ while ($true) {
     # 2. Filter to selected tunnels
     # --------------------------------------------------------
     $selectedTunnels = Filter-SelectedTunnels -Tunnels $tunnels -SelectedNames $config.selectedTunnelNames
-    if ($selectedTunnels.Count -eq 0) {
+    $hasSelectedFilter = ($config.selectedTunnelNames -and $config.selectedTunnelNames.Count -gt 0)
+
+    # 未配置任何勾选隧道 → 跳过推送
+    if ($selectedTunnels.Count -eq 0 -and -not $hasSelectedFilter) {
         Write-GuardLog -Level "CHECK" -Message "未勾选隧道，跳过推送"
         $global:lastData = $selectedTunnels
         Save-LastSent -Tunnels $selectedTunnels
