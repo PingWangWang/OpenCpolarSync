@@ -200,12 +200,18 @@ function Invoke-CpolarApi {
         $result = $rawJson | ConvertFrom-Json
         return @{ Parsed = $result; Raw = $rawJson }
     } catch {
-        $statusCode = $_.Exception.Response.StatusCode.value__
-        try {
-            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-            $body = $reader.ReadToEnd()
-            $reader.Close()
-        } catch { $body = "(无法读取响应体)" }
+        $statusCode = "?"
+        $body = "(无法读取响应体)"
+        if ($_.Exception.Response) {
+            try { $statusCode = $_.Exception.Response.StatusCode.value__ } catch { }
+            try {
+                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $body = $reader.ReadToEnd()
+                $reader.Close()
+            } catch { }
+        } else {
+            $body = $_.Exception.Message
+        }
         Write-GuardLog -Level "WARN" -Message "API($Method) failed: $statusCode - $body"
         return $null
     }
@@ -330,7 +336,7 @@ function Fetch-Tunnels {
     if ($null -eq $tunnels) { $tunnels = @() }
 
     # Normalize: add computed display fields, keep ALL original API fields
-    $tunnels = $tunnels | ForEach-Object {
+    $tunnels = @($tunnels | ForEach-Object {
         $t = $_
         $cfg = if ($t.configuration) { $t.configuration } else { $null }
         $pub = if ($t.publish_tunnels -and $t.publish_tunnels.Count -gt 0) { $t.publish_tunnels[0] } else { $null }
@@ -365,7 +371,7 @@ function Fetch-Tunnels {
         $t | Add-Member -NotePropertyName "createTime" -NotePropertyValue $createTimeVal -Force
 
         $t
-    }
+    })
 
     $tunnelCount = $tunnels.Count
 
@@ -376,7 +382,7 @@ function Fetch-Tunnels {
         Write-GuardLog -Level "INFO" -Message "Raw API response: $rawPreview"
     }
 
-    return $tunnels
+    Write-Output -NoEnumerate $tunnels
 }
 
 # ============================================================
@@ -391,61 +397,65 @@ function Detect-TunnelChanges {
 
     $hasSelectedFilter = ($SelectedIds -and $SelectedIds.Count -gt 0)
 
-    # Build lookup maps by tunnel name
+    # Build lookup maps by tunnel id (name|protocol) to handle same-name multi-protocol tunnels
     $oldMap = @{}
     if ($OldData) {
         foreach ($t in $OldData) {
-            $name = if ($t.name) { $t.name } else { "" }
-            $oldMap[$name] = $t
+            $id = Get-TunnelId $t
+            $oldMap[$id] = $t
         }
     }
 
     $newMap = @{}
     foreach ($t in $NewData) {
-        $name = if ($t.name) { $t.name } else { "" }
-        $newMap[$name] = $t
+        $id = Get-TunnelId $t
+        $newMap[$id] = $t
     }
 
-    # Filter by selected tunnel names if configured
-    $relevantNewNames = if ($hasSelectedFilter) {
-        $newMap.Keys | Where-Object { $_ -in $SelectedIds }
+    # Filter by selected tunnel names if configured (keys are name|protocol, compare name part)
+    $relevantNewIds = if ($hasSelectedFilter) {
+        $newMap.Keys | Where-Object { ($_ -split '\|')[0] -in $SelectedIds }
     } else {
         $newMap.Keys
     }
 
-    $added       = @()
-    $updated     = @()
-    $reconnected = @()
-    $removed     = @()
+    $added         = @()
+    $updated       = @()
+    $reconnected   = @()
+    $removed       = @()
+    $updatedDetails = @{}
 
     # Detect added, updated, and reconnected
-    foreach ($name in $relevantNewNames) {
-        if (-not $oldMap.ContainsKey($name)) {
-            $added += $newMap[$name]
-        } elseif (-not (Test-TunnelEqual -a $newMap[$name] -b $oldMap[$name])) {
+    foreach ($id in $relevantNewIds) {
+        if (-not $oldMap.ContainsKey($id)) {
+            $added += $newMap[$id]
+        } elseif (-not (Test-TunnelEqual -a $newMap[$id] -b $oldMap[$id])) {
             # 状态变为 inactive → 归入离线
-            if ($newMap[$name].status -eq "inactive") {
-                $removed += $newMap[$name]
-            } elseif ($oldMap[$name].status -eq "inactive") {
+            if ($newMap[$id].status -eq "inactive") {
+                $removed += $newMap[$id]
+            } elseif ($oldMap[$id].status -eq "inactive") {
                 # 从 inactive 恢复 → 归入重新上线
-                $reconnected += $newMap[$name]
+                $reconnected += $newMap[$id]
             } else {
-                $updated += $newMap[$name]
+                $updated += $newMap[$id]
+                # Record field-level change details
+                $fieldDiff = Get-TunnelDiffFields -a $newMap[$id] -b $oldMap[$id]
+                $updatedDetails[$id] = $fieldDiff
             }
-        } elseif ($newMap[$name].createTime -ne $oldMap[$name].createTime) {
-            $reconnected += $newMap[$name]
+        } elseif ($newMap[$id].createTime -ne $oldMap[$id].createTime) {
+            $reconnected += $newMap[$id]
         }
     }
 
     # Detect removed (only among previously relevant tunnels)
-    $relevantOldNames = if ($hasSelectedFilter) {
-        $oldMap.Keys | Where-Object { $_ -in $SelectedIds }
+    $relevantOldIds = if ($hasSelectedFilter) {
+        $oldMap.Keys | Where-Object { ($_ -split '\|')[0] -in $SelectedIds }
     } else {
         $oldMap.Keys
     }
-    foreach ($name in $relevantOldNames) {
-        if (-not $newMap.ContainsKey($name)) {
-            $t = $oldMap[$name]
+    foreach ($id in $relevantOldIds) {
+        if (-not $newMap.ContainsKey($id)) {
+            $t = $oldMap[$id]
             $t | Add-Member -NotePropertyName "status" -NotePropertyValue "offline" -Force
             $removed += $t
         }
@@ -454,11 +464,12 @@ function Detect-TunnelChanges {
     $hasChanges = ($added.Count -gt 0) -or ($updated.Count -gt 0) -or ($reconnected.Count -gt 0) -or ($removed.Count -gt 0)
 
     return @{
-        added       = $added
-        updated     = $updated
-        reconnected = $reconnected
-        removed     = $removed
-        hasChanges  = $hasChanges
+        added          = $added
+        updated        = $updated
+        reconnected    = $reconnected
+        removed        = $removed
+        hasChanges     = $hasChanges
+        updatedDetails = $updatedDetails
     }
 }
 
@@ -475,6 +486,21 @@ function Test-TunnelEqual {
         if ($va -ne $vb) { return $false }
     }
     return $true
+}
+
+# ============================================================
+# Function: Get-TunnelDiffFields — return list of changed fields between two tunnels
+# ============================================================
+function Get-TunnelDiffFields {
+    param($a, $b)
+    $fields = @('name', 'protocol', 'publicUrl', 'localAddr', 'status')
+    $diff = @()
+    foreach ($f in $fields) {
+        $va = if ($a.$f) { $a.$f.ToString() } else { "" }
+        $vb = if ($b.$f) { $b.$f.ToString() } else { "" }
+        if ($va -ne $vb) { $diff += @{ field = $f; old = $va; new = $vb } }
+    }
+    return $diff
 }
 
 # ============================================================
@@ -502,71 +528,43 @@ function Filter-SelectedTunnels {
 function Build-DingTalkMessage {
     param(
         $DiffResult,
-        [string]$Keyword = "Cpolar"
+        [string]$Keyword = "Cpolar",
+        $ConfigEvents = $null,
+        $SystemEvents = $null
     )
 
     $now = Get-Date
     $timeStr = $now.ToString("yyyy-MM-dd HH:mm:ss")
 
-    $lines = @()
-    $lines += "$Keyword"
-    $lines += ""
-    $lines += "## Cpolar 隧道状态变更通知"
-    $lines += ""
-    $lines += "---"
-    $lines += ""
+    # Build header
+    $blocks = @()
+    $blocks += "$Keyword"
+    $blocks += ""
+    $blocks += "## Cpolar 监控报告"
+    $blocks += ""
 
-    # Helper to format a tunnel entry
-    function Format-TunnelEntry {
-        param($t, $prefix, $title)
-        $lines = @()
-        $lines += "**$prefix $($t.name)** — $title"
-        if ($t.protocol)  { $lines += "- 协议：$($t.protocol)" }
-        if ($t.publicUrl) { $lines += "- 公网地址：$($t.publicUrl)" }
-        if ($t.localAddr) { $lines += "- 本地地址：$($t.localAddr)" }
-        if ($t.createTime) { $lines += "- 创建时间：$($t.createTime)" }
-        $lines += ""
-        return $lines
-    }
+    # [01] Config changes block
+    $configBlock = Format-ConfigBlock -ConfigEvents $ConfigEvents
+    if ($configBlock) { $blocks += $configBlock }
 
-    # Added tunnels
-    if ($DiffResult.added.Count -gt 0) {
-        foreach ($t in $DiffResult.added) {
-            $lines += Format-TunnelEntry -t $t -prefix "🟢" -title "新增上线"
-        }
-    }
+    # [02] Tunnel changes block
+    $tunnelBlock = Format-TunnelBlock -DiffResult $DiffResult
+    if ($tunnelBlock) { $blocks += $tunnelBlock }
 
-    # Updated tunnels
-    if ($DiffResult.updated.Count -gt 0) {
-        foreach ($t in $DiffResult.updated) {
-            $lines += Format-TunnelEntry -t $t -prefix "🔄" -title "信息变更"
-        }
-    }
-
-    # Reconnected tunnels (only createTime changed — tunnel restarted)
-    if ($DiffResult.reconnected.Count -gt 0) {
-        foreach ($t in $DiffResult.reconnected) {
-            $lines += Format-TunnelEntry -t $t -prefix "🟢" -title "重新上线（隧道重启）"
-        }
-    }
-
-    # Offline tunnels
-    if ($DiffResult.removed.Count -gt 0) {
-        foreach ($t in $DiffResult.removed) {
-            $lines += Format-TunnelEntry -t $t -prefix "🔴" -title "已离线"
-        }
-    }
+    # [03] System status block
+    $systemBlock = Format-SystemBlock -SystemEvents $SystemEvents
+    if ($systemBlock) { $blocks += $systemBlock }
 
     # Footer with detection time
-    $lines += "---"
-    $lines += ""
-    $lines += "⏱ 检测时间：$timeStr"
+    $blocks += "---"
+    $blocks += ""
+    $blocks += "⏱ 检测时间：$timeStr"
 
     return @{
         msgtype = "markdown"
         markdown = @{
-            title = "Cpolar 隧道状态变更"
-            text  = $lines -join "`n"
+            title = "Cpolar 监控报告"
+            text  = ($blocks -join "`n")
         }
     }
 }
@@ -655,6 +653,184 @@ function Get-IntervalSeconds {
 }
 
 # ============================================================
+# Function: Format-FieldValue — normalize field value for display
+# ============================================================
+function Format-FieldValue {
+    param($Value)
+    if ($null -eq $Value -or ($Value -is [string] -and $Value -eq "")) { return "—" }
+    if ($Value -is [int] -and $Value -eq 0) { return "0" }
+    $str = $Value.ToString()
+    if ($str.Length -gt 100) { return $str.Substring(0, 97) + "..." }
+    return $str
+}
+
+# ============================================================
+# Function: Compare-ConfigState — detect field-level config changes
+# ============================================================
+function Compare-ConfigState {
+    param($Current, $Last)
+
+    $result = @{ hasChanges = $false; changedFields = @(); missingFields = @(); configState = "valid" }
+    if (-not $Last) { return $result }
+
+    # Compare scalar fields
+    $scalarFields = @(
+        @{ name = "webhookUrl";        label = "Webhook 地址";   sensitive = $true  }
+        @{ name = "interval";          label = "轮询间隔";       sensitive = $false }
+        @{ name = "cpolarApiBase";     label = "API 地址";       sensitive = $false }
+        @{ name = "keyword";           label = "消息关键词";     sensitive = $false }
+        @{ name = "debug";             label = "调试模式";       sensitive = $false }
+    )
+    foreach ($f in $scalarFields) {
+        $oldVal = Format-FieldValue ($Last.$($f.name))
+        $newVal = Format-FieldValue ($Current.$($f.name))
+        if ($oldVal -ne $newVal) {
+            $entry = @{ field = $f.label; old = $oldVal; new = $newVal; sensitive = $f.sensitive }
+            $result.hasChanges = $true
+            $result.changedFields += $entry
+        }
+    }
+
+    # Compare selectedTunnelNames (array)
+    $oldNames = if ($Last.selectedTunnelNames) { @($Last.selectedTunnelNames) } else { @() }
+    $newNames = if ($Current.selectedTunnelNames) { @($Current.selectedTunnelNames) } else { @() }
+    $addedNames   = $newNames | Where-Object { $_ -notin $oldNames }
+    $removedNames = $oldNames | Where-Object { $_ -notin $newNames }
+    if ($addedNames.Count -gt 0 -or $removedNames.Count -gt 0) {
+        $result.hasChanges = $true
+        $result.changedFields += @{
+            field     = "监控隧道列表"
+            old       = if ($oldNames.Count -gt 0) { $oldNames -join ", " } else { "（空）" }
+            new       = if ($newNames.Count -gt 0) { $newNames -join ", " } else { "（空）" }
+            sensitive = $false
+        }
+    }
+
+    # Detect missing required fields (only warn when empty)
+    if (-not $Current.webhookUrl) { $result.missingFields += "webhookUrl" }
+    if (-not $Current.selectedTunnelNames -or $Current.selectedTunnelNames.Count -eq 0) { $result.missingFields += "selectedTunnelNames" }
+
+    return $result
+}
+
+# ============================================================
+# Function: Format-ConfigBlock — render [01] Config changes section
+# ============================================================
+function Format-ConfigBlock {
+    param($ConfigEvents)
+    if (-not $ConfigEvents -or $ConfigEvents.Count -eq 0) { return $null }
+
+    $lines = @()
+    $lines += "━━━ Config 配置变更 ━━━"
+    $lines += ""
+    foreach ($evt in $ConfigEvents) {
+        $lines += "**⚙️ $($evt.field) — 已变更**"
+        if ($evt.sensitive) {
+            $lines += "- 原值：$(Format-FieldValue $evt.old)"
+            $lines += "- 新值：$(Format-FieldValue $evt.new)"
+            $lines += "- 提示：敏感字段已隐藏实际值"
+        } else {
+            $lines += "- 原值：$(Format-FieldValue $evt.old)"
+            $lines += "- 新值：$(Format-FieldValue $evt.new)"
+            $lines += "- 生效：下一轮检测生效"
+        }
+        $lines += ""
+    }
+    return ($lines -join "`n")
+}
+
+# ============================================================
+# Function: Format-TunnelBlock — render [02] Tunnel changes section
+# ============================================================
+function Format-TunnelBlock {
+    param($DiffResult)
+
+    if (-not $DiffResult -or -not $DiffResult.hasChanges) { return $null }
+
+    # Helper: format one tunnel entry with fixed 3 fields
+    function Format-TunnelEntry3 {
+        param($t, $prefix, $title, $extraFields)
+        $el = @()
+        $el += "**$prefix $($t.name) — $title**"
+        $el += "- 协议：$(Format-FieldValue $t.protocol)"
+        $el += "- 公网地址：$(Format-FieldValue $t.publicUrl)"
+        $el += "- 本地地址：$(Format-FieldValue $t.localAddr)"
+        $el += "- 创建时间：$(Format-FieldValue $t.createTime)"
+        if ($extraFields) {
+            foreach ($ef in $extraFields) {
+                $el += "- $($ef.label)：$(Format-FieldValue $ef.value)"
+            }
+        }
+        $el += ""
+        return $el
+    }
+
+    $lines = @()
+    $lines += "━━━ 隧道状态变更 ━━━"
+    $lines += ""
+
+    # Added
+    foreach ($t in $DiffResult.added) {
+        $lines += Format-TunnelEntry3 -t $t -prefix "🟢" -title "新增上线"
+    }
+    # Reconnected
+    foreach ($t in $DiffResult.reconnected) {
+        $lines += Format-TunnelEntry3 -t $t -prefix "🟢" -title "重新上线"
+    }
+    # Updated
+    foreach ($t in $DiffResult.updated) {
+        $name = if ($t.name) { $t.name } else { "" }
+        $details = @()
+        if ($DiffResult.updatedDetails -and $DiffResult.updatedDetails[$name]) {
+            $changedFields = ($DiffResult.updatedDetails[$name] | ForEach-Object { $_.field }) -join "、"
+            $details += @{ label = "变更项"; value = $changedFields }
+        }
+        $lines += Format-TunnelEntry3 -t $t -prefix "🔄" -title "信息变更" -extraFields $details
+    }
+    # Removed / offline
+    foreach ($t in $DiffResult.removed) {
+        $lines += Format-TunnelEntry3 -t $t -prefix "🔴" -title "已离线"
+    }
+
+    return ($lines -join "`n")
+}
+
+# ============================================================
+# Function: Format-SystemBlock — render [03] System status section
+# ============================================================
+function Format-SystemBlock {
+    param($SystemEvents)
+    if (-not $SystemEvents -or $SystemEvents.Count -eq 0) { return $null }
+
+    $lines = @()
+    $lines += "━━━ 系统状态 ━━━"
+    $lines += ""
+
+    foreach ($evt in $SystemEvents) {
+        $emoji = switch ($evt.type) {
+            'AUTH_FAILED'       { "🔑❌" }
+            'AUTH_RECOVERED'    { "🔑✅" }
+            'API_FAILED'        { "🌐❌" }
+            'API_RECOVERED'     { "🌐✅" }
+            'PUSH_FAILED_ALERT' { "📤🔴" }
+            'PUSH_RECOVERED'    { "📤✅" }
+            'DATA_INCOMPLETE'   { "⚠️📡" }
+            'FIRST_RUN'         { "🚀" }
+            default             { "ℹ️" }
+        }
+        $lines += "**$emoji $($evt.title) — $($evt.action)**"
+        if ($evt.fields) {
+            foreach ($f in $evt.fields) {
+                $lines += "- $($f.label)：$(Format-FieldValue $f.value)"
+            }
+        }
+        $lines += ""
+    }
+
+    return ($lines -join "`n")
+}
+
+# ============================================================
 # Entry point
 # ============================================================
 
@@ -672,6 +848,9 @@ if (-not $config) {
 $global:pollInterval = Get-IntervalSeconds -Config $config
 $global:lastData = Load-LastSent
 $global:isFirstRun = $true
+$global:lastConfig = $null              # 上一轮 config 快照（用于字段级对比）
+$global:pushHistory = @{ consecutiveFails = 0; lastFailTime = $null; lastFailReason = "" }
+$global:apiHistory = @{ consecutiveFails = 0; lastSuccessTime = $null; lastFailTime = $null; lastFailReason = "" }
 
 Write-GuardLog -Level "INFO" -Message "Poll interval: $($global:pollInterval)s | Debug=$($config.debug)"
 if (-not $config.webhookUrl) {
@@ -716,33 +895,96 @@ while ($true) {
     $global:pollInterval = Get-IntervalSeconds -Config $config
 
     # --------------------------------------------------------
+    # [Config] Detect field-level config changes
+    # --------------------------------------------------------
+    $configDiff = Compare-ConfigState -Current $config -Last $global:lastConfig
+    if ($configDiff.hasChanges) {
+        $global:lastConfig = $config
+        Write-GuardLog -Level "INFO" -Message "Config 变更: $($configDiff.changedFields.Count) 个字段"
+    } elseif (-not $global:lastConfig) {
+        # First successful load — establish baseline
+        $global:lastConfig = $config
+    }
+    if ($configDiff.missingFields.Count -gt 0) {
+        Write-GuardLog -Level "WARN" -Message "Config 缺失字段: $($configDiff.missingFields -join ', ')"
+    }
+
+    # --------------------------------------------------------
     # 1. Fetch tunnels from Cpolar API
     # --------------------------------------------------------
     $tunnels = Fetch-Tunnels -Config $config
     if ($null -eq $tunnels) {
-        Write-GuardLog -Level "WARN" -Message "获取隧道数据失败（检查 token 或 Cpolar Web 是否运行），将在下一周期重试"
+        $global:apiHistory.consecutiveFails++
+        $global:apiHistory.lastFailTime = Get-Date
+        if ($global:apiHistory.consecutiveFails -eq 1) {
+            Write-GuardLog -Level "WARN" -Message "API 请求失败（首次），将在下一周期重试"
+        } elseif ($global:apiHistory.consecutiveFails -eq 3) {
+            Write-GuardLog -Level "WARN" -Message "API 已连续 $($global:apiHistory.consecutiveFails) 次失败，请检查 Cpolar Web 服务是否运行，但历史记录中仍有 $(@($global:lastData).Count) 个隧道"
+        } else {
+            Write-GuardLog -Level "WARN" -Message "API 请求失败（连续 $($global:apiHistory.consecutiveFails) 次）"
+        }
         Start-Sleep -Seconds $global:pollInterval
         continue
+    }
+    # API success — reset failure counter
+    if ($global:apiHistory.consecutiveFails -gt 0) {
+        Write-GuardLog -Level "INFO" -Message "API 已恢复（之前连续失败 $($global:apiHistory.consecutiveFails) 次）"
+        $global:apiHistory.consecutiveFails = 0
+        $global:apiHistory.lastSuccessTime = Get-Date
     }
 
     # --------------------------------------------------------
     # 2. Filter to selected tunnels
     # --------------------------------------------------------
     $selectedTunnels = Filter-SelectedTunnels -Tunnels $tunnels -SelectedNames $config.selectedTunnelNames
-    $hasSelectedFilter = ($config.selectedTunnelNames -and $config.selectedTunnelNames.Count -gt 0)
 
-    # 未配置任何勾选隧道 → 跳过推送
-    if ($selectedTunnels.Count -eq 0 -and -not $hasSelectedFilter) {
-        Write-GuardLog -Level "CHECK" -Message "未勾选隧道，跳过推送"
-        $global:lastData = $selectedTunnels
-        Save-LastSent -Tunnels $selectedTunnels
+    # 无任何匹配隧道 → 检查是否有历史数据需要离线通知
+    if ($selectedTunnels.Count -eq 0) {
+        # 检查 lastData 是否有历史记录（last-sent.json 中缓存的隧道）
+        $hasHistorical = $global:lastData -and (@($global:lastData).Count -gt 0)
+
+        if ($hasHistorical -and -not $global:isFirstRun) {
+            # 之前缓存的隧道全部消失 → 触发离线检测
+            $historicalCount = @($global:lastData).Count
+            Write-GuardLog -Level "INFO" -Message "API 返回空列表，但历史记录中有 $historicalCount 个隧道，检测到全部离线"
+
+            $diff = Detect-TunnelChanges -OldData $global:lastData -NewData @() -SelectedIds @()
+            if ($diff.hasChanges) {
+                $message = Build-DingTalkMessage -DiffResult $diff -Keyword $config.keyword -ConfigEvents $configDiff.changedFields -SystemEvents $null
+                $success = Send-DingTalkWebhook -WebhookUrl $config.webhookUrl -MessageBody $message
+
+                if ($success) {
+                    $global:lastData = @()
+                    Save-LastSent -Tunnels @()
+                    Write-GuardLog -Level "INFO" -Message "全部隧道离线推送完成，已清空 last-sent.json"
+                } else {
+                    Write-GuardLog -Level "WARN" -Message "全部隧道离线推送失败"
+                }
+            }
+        } else {
+            Write-GuardLog -Level "CHECK" -Message "无匹配隧道且无历史记录，跳过推送"
+        }
+
+        $global:lastData = @()
+        Save-LastSent -Tunnels @()
         $global:isFirstRun = $false
+
+        # Still push config-only changes (if no offline push was done above)
+        if ($configDiff.hasChanges -and -not $hasHistorical) {
+            $message = Build-DingTalkMessage -DiffResult $null -Keyword $config.keyword -ConfigEvents $configDiff.changedFields
+            $success = Send-DingTalkWebhook -WebhookUrl $config.webhookUrl -MessageBody $message
+            if ($success) {
+                Write-GuardLog -Level "INFO" -Message "Config 变更推送完成"
+            } else {
+                Write-GuardLog -Level "WARN" -Message "Config 变更推送失败"
+            }
+        }
         Start-Sleep -Seconds $global:pollInterval
         continue
     }
 
     # --------------------------------------------------------
-    # 3. Detect changes
+    # 3. Detect tunnel changes
     # --------------------------------------------------------
     $oldData = if ($global:isFirstRun) { Load-LastSent } else { $global:lastData }
     $diff = Detect-TunnelChanges -OldData $oldData -NewData $selectedTunnels -SelectedIds $config.selectedTunnelNames
@@ -752,28 +994,64 @@ while ($true) {
     $global:isFirstRun = $false
 
     # --------------------------------------------------------
-    # 4. Push if there are changes
+    # 4. Collect system events
     # --------------------------------------------------------
-    if ($diff.hasChanges) {
-        Write-GuardLog -Level "INFO" -Message "变更检测: $($diff.added.Count) 新增, $($diff.updated.Count) 更新, $($diff.reconnected.Count) 重新上线, $($diff.removed.Count) 离线"
+    $systemEvents = @()
+
+    # Push failure alert (only when consecutive failures reach threshold)
+    if ($global:pushHistory.consecutiveFails -ge 3) {
+        $lastFailStr = if ($global:pushHistory.lastFailTime) { $global:pushHistory.lastFailTime.ToString("yyyy-MM-dd HH:mm:ss") } else { "—" }
+        $systemEvents += @{
+            type   = "PUSH_FAILED_ALERT"
+            title  = "推送持续失败"
+            action = "已连续 $($global:pushHistory.consecutiveFails) 次"
+            fields = @(
+                @{ label = "连续失败次数"; value = "$($global:pushHistory.consecutiveFails) 次" }
+                @{ label = "最后失败时间"; value = $lastFailStr }
+                @{ label = "建议";         value = "检查 config.json 中的 webhookUrl 是否正确" }
+            )
+        }
+    }
+
+    # --------------------------------------------------------
+    # 5. Push if there are any changes
+    # --------------------------------------------------------
+    $hasAnyChanges = $diff.hasChanges -or $configDiff.hasChanges -or $systemEvents.Count -gt 0
+
+    if ($hasAnyChanges) {
+        if ($diff.hasChanges) {
+            Write-GuardLog -Level "INFO" -Message "变更检测: $($diff.added.Count) 新增, $($diff.updated.Count) 更新, $($diff.reconnected.Count) 重新上线, $($diff.removed.Count) 离线"
+        }
 
         # 数据完整性检查：等待 Cpolar API 数据稳定后再推送
         # 排除离线隧道（removed），它们没有新数据是正常的
         $allOnChanged = $diff.added + $diff.updated + $diff.reconnected
         $incompleteTunnels = $allOnChanged | Where-Object { -not $_.protocol -or -not $_.publicUrl }
 
-        if ($incompleteTunnels) {
+        if ($incompleteTunnels -and $diff.hasChanges) {
             $names = ($incompleteTunnels | ForEach-Object { $_.name }) -join ", "
             Write-GuardLog -Level "WARN" -Message "隧道 [$names] 数据不完整（缺少协议或公网地址），Cpolar API 数据尚未就绪，本轮跳过推送，下一轮重试"
         } else {
-            $message = Build-DingTalkMessage -DiffResult $diff -Keyword $config.keyword
+            $message = Build-DingTalkMessage -DiffResult $diff -Keyword $config.keyword -ConfigEvents $configDiff.changedFields -SystemEvents $systemEvents
             $success = Send-DingTalkWebhook -WebhookUrl $config.webhookUrl -MessageBody $message
 
             if ($success) {
-                Save-LastSent -Tunnels $selectedTunnels
+                if ($diff.hasChanges) { Save-LastSent -Tunnels $selectedTunnels }
                 Write-GuardLog -Level "INFO" -Message "推送完成"
+                # Reset push failure counter on success
+                if ($global:pushHistory.consecutiveFails -gt 0) {
+                    Write-GuardLog -Level "INFO" -Message "推送已恢复（之前连续失败 $($global:pushHistory.consecutiveFails) 次）"
+                    $global:pushHistory.consecutiveFails = 0
+                    $global:pushHistory.lastFailTime = $null
+                    $global:pushHistory.lastFailReason = ""
+                }
             } else {
-                Write-GuardLog -Level "WARN" -Message "推送失败，下次重试时重新检测"
+                $global:pushHistory.consecutiveFails++
+                $global:pushHistory.lastFailTime = Get-Date
+                if ($global:pushHistory.consecutiveFails -eq 1) {
+                    $global:pushHistory.lastFailReason = "首次推送失败"
+                }
+                Write-GuardLog -Level "WARN" -Message "推送失败（已连续 $($global:pushHistory.consecutiveFails) 次）"
             }
         }
     } else {
@@ -781,7 +1059,7 @@ while ($true) {
     }
 
     # --------------------------------------------------------
-    # 5. Wait for next polling cycle
+    # 6. Wait for next polling cycle
     # --------------------------------------------------------
     Start-Sleep -Seconds $global:pollInterval
 }
