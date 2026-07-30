@@ -7,12 +7,18 @@ cd /d "%~dp0"
 fltmc >nul 2>&1
 if %errorlevel% neq 0 (
     echo 请求管理员权限，请在弹出的 UAC 窗口中点击「是」...
-    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    powershell -Command "Start-Process '%~f0' -Verb RunAs -ArgumentList '%~1'"
     exit /b
 )
 
 :: ============================================================
-:: 菜单选择
+:: Command-line mode — skip menu when add/remove argument given
+:: ============================================================
+if /i "%~1"=="add" set "SILENT=1" && goto add_autostart
+if /i "%~1"=="remove" set "SILENT=1" && goto remove_autostart
+
+:: ============================================================
+:: 菜单选择（无参数时进入交互模式）
 :: ============================================================
 cls
 echo ====================================
@@ -34,7 +40,7 @@ if errorlevel 1 goto add_autostart
 if not exist "CpolarGuard.ps1" (
     echo 错误：CpolarGuard.ps1 未找到。
     echo 请从 Cpolar 目录运行此脚本。
-    pause
+    if not defined SILENT pause
     exit /b 1
 )
 
@@ -42,7 +48,7 @@ if not exist "CpolarGuard.ps1" (
 for /f "tokens=2*" %%a in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders" /v Startup 2^>nul') do set "STARTUP=%%b"
 if "%STARTUP%"=="" (
     echo 错误：无法获取启动文件夹路径。
-    pause
+    if not defined SILENT pause
     exit /b 1
 )
 
@@ -62,7 +68,7 @@ if exist "%LNK%" (
 ) else (
     echo 错误：创建快捷方式失败。
 )
-pause
+if not defined SILENT pause
 exit /b
 
 :: ============================================================
@@ -74,7 +80,7 @@ exit /b
 for /f "tokens=2*" %%a in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders" /v Startup 2^>nul') do set "STARTUP=%%b"
 if "%STARTUP%"=="" (
     echo 错误：无法获取启动文件夹路径。
-    pause
+    if not defined SILENT pause
     exit /b 1
 )
 
@@ -82,7 +88,7 @@ set "LNK=%STARTUP%\CpolarGuard.lnk"
 
 if not exist "%LNK%" (
     echo 开机自启未设置，无需删除。
-    pause
+    if not defined SILENT pause
     exit /b 0
 )
 
@@ -95,5 +101,5 @@ if exist "%LNK%" (
     echo 开机自启已删除！
     echo CpolarGuard 将不再随系统启动。
 )
-pause
+if not defined SILENT pause
 exit /b

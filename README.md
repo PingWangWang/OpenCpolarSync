@@ -8,12 +8,13 @@
 
 ## 项目简介
 
-OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含两个独立子项目：
+OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三个独立子模块：
 
-| 子项目 | 用途 | 技术栈 |
+| 子模块 | 用途 | 技术栈 |
 |--------|------|--------|
 | **[Cpolar](./Cpolar/)** | 自动监控 Cpolar 在线隧道状态，变更时通过钉钉 Webhook 推送通知 | Windows Batch / PowerShell |
 | **[Openlist](./Openlist/)** | openlist（基于 Alist）文件管理服务的常驻守护、开机自启管理 | Windows Batch / PowerShell |
+| **[Watchdog](./watchdog/)** | 运行时保活看门狗，Guard 进程异常退出时自动拉起 | Windows Batch / PowerShell |
 
 ---
 
@@ -41,12 +42,28 @@ OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含两�
 
 **安装方式**：下载后先解压 `archive/openlist.zip`，将 `openlist.exe` 放到 `Openlist/` 目录（与脚本同目录），详情见 [Openlist README](./Openlist/)。
 
+### [Watchdog 看门狗 →](./watchdog/)
+
+适合所有需要 **运行时保活** 的用户。当 CpolarGuard / OpenlistGuard 的 PowerShell 进程异常退出时自动拉起，确保持续在线。
+
+- `GuardCheck.ps1` — 通用巡检脚本，通过 Mutex 判活，参数化设计一份脚本服务两个模块
+- `WatchdogManager.bat` — 统一管理入口，一键配置（开机自启 + 运行时保活）
+- **零第三方依赖** — 完全利用 Windows 内置 Task Scheduler
+- **容错路径** — 支持仓库安装在带空格的目录下
+
+**安装方式**：以管理员身份运行 `watchdog\WatchdogManager.bat`，选 `1` 一键配置全部即可。
+
 ---
 
 ## 📁 仓库结构
 
 ```
 OpenCpolarSync/
+├── watchdog/                    # 运行时保活看门狗
+│   ├── GuardCheck.ps1          # 通用巡检脚本（Task Scheduler 触发）
+│   ├── WatchdogManager.bat     # 统一管理入口（安装/卸载/状态）
+│   ├── README.md               # 看门狗说明文档
+│   └── watchdog.log            # 恢复日志（自动生成）
 ├── Cpolar/                     # Cpolar 隧道状态监控（守护脚本）
 │   ├── CpolarGuard.ps1         # 常驻守护脚本
 │   ├── AutoStart.bat           # 开机自启管理
@@ -79,6 +96,7 @@ OpenCpolarSync/
 
 - **Cpolar 监控**：Windows PowerShell 5.0+，拥有 Cpolar Web 管理界面权限（`localhost:9200`），已创建钉钉机器人 Webhook
 - **Openlist 服务**：Windows 系统，管理员权限（用于守护脚本和开机自启管理）
+- **Watchdog 看门狗**：Windows 系统，管理员权限（用于注册计划任务）
 
 ## 🤝 贡献
 
