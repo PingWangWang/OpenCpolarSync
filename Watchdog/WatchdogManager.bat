@@ -9,8 +9,8 @@ cd /d "%~dp0"
 ::   交互菜单 : WatchdogManager.bat
 ::   命令行   : WatchdogManager.bat [setup|teardown|status] [Cpolar|Openlist|all]
 ::
-:: setup    — 一键配置（开机自启 + Watchdog 运行时保活）
-:: teardown — 一键移除（开机自启 + Watchdog 运行时保活）
+:: setup    — 一键配置（Watchdog 运行时保活，guard 由 Watchdog 在后台托管）
+:: teardown — 一键移除（Watchdog 运行时保活 + 旧开机自启清理）
 :: status   — 查询计划任务和 Guard 进程状态
 :: ============================================================
 
@@ -70,9 +70,9 @@ echo   OpenCpolarSync 看门狗管理
 echo ====================================
 echo   1. 一键配置全部（Cpolar + Openlist）
 echo   2. 一键移除全部
-echo   3. 仅配置 Cpolar（开机自启 + 保活）
+echo   3. 仅配置 Cpolar（Watchdog 保活）
 echo   4. 仅移除 Cpolar
-echo   5. 仅配置 Openlist（开机自启 + 保活）
+echo   5. 仅配置 Openlist（Watchdog 保活）
 echo   6. 仅移除 Openlist
 echo   7. 查看状态
 echo ====================================
@@ -94,11 +94,13 @@ exit /b
 :: ============================================================
 :: :register_task — create a Task Scheduler recurring task
 :: Parameters: %1=TaskName %2=GuardName %3=GuardScriptPath %4=MutexName
+:: [修改] LogonType Interactive → S4U：任务在 Session 0 非交互会话运行，
+::       控制台窗口根本不创建（根治 tick 弹窗）；guard 已核实无会话依赖
 :: ============================================================
 :register_task
 echo   [*] 注册计划任务: %~1
 
-powershell -ExecutionPolicy Bypass -Command "$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument \"-ExecutionPolicy Bypass -WindowStyle Hidden -File `\"%~dp0GuardCheck.ps1`\" -GuardName %~2 -MutexName `\"%~4`\" -GuardScriptPath `\"%~3`\" -LogPath `\"%~dp0watchdog.log`\"\"; $p=New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive; $t=New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 5); $s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10); Register-ScheduledTask -TaskName '%~1' -Action $a -Principal $p -Trigger $t -Settings $s -Force; Write-Host '    [OK] 已注册'"
+powershell -ExecutionPolicy Bypass -Command "$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument \"-ExecutionPolicy Bypass -WindowStyle Hidden -File `\"%~dp0GuardCheck.ps1`\" -GuardName %~2 -MutexName `\"%~4`\" -GuardScriptPath `\"%~3`\" -LogPath `\"%~dp0watchdog.log`\"\"; $p=New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U; $t=New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 5); $s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10); Register-ScheduledTask -TaskName '%~1' -Action $a -Principal $p -Trigger $t -Settings $s -Force; Write-Host '    [OK] 已注册'"
 
 if %errorlevel% neq 0 (
     echo   [FAIL] 注册失败，请以管理员身份运行
@@ -168,59 +170,59 @@ set "TARGET=%~1"
 if "%TARGET%"=="" set "TARGET=all"
 
 if /i "%TARGET%"=="Cpolar" (
-    echo === 一键配置 Cpolar（开机自启 + Watchdog） ===
+    echo === 一键配置 Cpolar（Watchdog 保活） ===
     if exist "%CPOLAR_AUTOSTART%" (
-        echo [1/2] 添加 Cpolar 开机自启...
-        call "%CPOLAR_AUTOSTART%" add
+        echo [1/2] 清理旧 Cpolar 开机自启（guard 改由 Watchdog 托管）...
+        call "%CPOLAR_AUTOSTART%" remove
     ) else (
-        echo [WARN] Cpolar\AutoStart.bat 未找到，跳过开机自启
+        echo [WARN] Cpolar\AutoStart.bat 未找到，跳过自启清理
     )
-    echo [2/2] 注册 Cpolar Watchdog...
+    echo [2/2] 注册 Cpolar Watchdog（S4U / Session 0）...
     call :register_task "%TASK_CPOLAR%" Cpolar "%CPOLAR_GUARD%" "%CPOLAR_MUTEX%"
     if errorlevel 1 (
         echo   [FAIL] Watchdog 注册失败，请以管理员身份运行
         pause
         exit /b 1
     )
-    echo 完成：Cpolar 已配置开机自启 + 运行时保活
+    echo 完成：Cpolar 已配置运行时保活（guard 由 Watchdog 在后台托管）
     exit /b
 )
 if /i "%TARGET%"=="Openlist" (
-    echo === 一键配置 Openlist（开机自启 + Watchdog） ===
+    echo === 一键配置 Openlist（Watchdog 保活） ===
     if exist "%OPENLIST_AUTOSTART%" (
-        echo [1/2] 添加 Openlist 开机自启...
-        call "%OPENLIST_AUTOSTART%" add
+        echo [1/2] 清理旧 Openlist 开机自启（guard 改由 Watchdog 托管）...
+        call "%OPENLIST_AUTOSTART%" remove
     ) else (
-        echo [WARN] Openlist\AutoStart.bat 未找到，跳过开机自启
+        echo [WARN] Openlist\AutoStart.bat 未找到，跳过自启清理
     )
-    echo [2/2] 注册 Openlist Watchdog...
+    echo [2/2] 注册 Openlist Watchdog（S4U / Session 0）...
     call :register_task "%TASK_OPENLIST%" Openlist "%OPENLIST_GUARD%" "%OPENLIST_MUTEX%"
     if errorlevel 1 (
         echo   [FAIL] Watchdog 注册失败，请以管理员身份运行
         pause
         exit /b 1
     )
-    echo 完成：Openlist 已配置开机自启 + 运行时保活
+    echo 完成：Openlist 已配置运行时保活（guard 由 Watchdog 在后台托管）
     exit /b
 )
 if /i "%TARGET%"=="all" (
-    echo === 一键配置全部（开机自启 + Watchdog） ===
+    echo === 一键配置全部（Watchdog 保活） ===
     if exist "%CPOLAR_AUTOSTART%" (
-        echo [1/4] 添加 Cpolar 开机自启...
-        call "%CPOLAR_AUTOSTART%" add
+        echo [1/4] 清理旧 Cpolar 开机自启（guard 改由 Watchdog 托管）...
+        call "%CPOLAR_AUTOSTART%" remove
     )
     if exist "%OPENLIST_AUTOSTART%" (
-        echo [2/4] 添加 Openlist 开机自启...
-        call "%OPENLIST_AUTOSTART%" add
+        echo [2/4] 清理旧 Openlist 开机自启（guard 改由 Watchdog 托管）...
+        call "%OPENLIST_AUTOSTART%" remove
     )
-    echo [3/4] 注册 Cpolar Watchdog...
+    echo [3/4] 注册 Cpolar Watchdog（S4U / Session 0）...
     call :register_task "%TASK_CPOLAR%" Cpolar "%CPOLAR_GUARD%" "%CPOLAR_MUTEX%"
     if errorlevel 1 (
         echo   [FAIL] Cpolar Watchdog 注册失败，已终止
         pause
         exit /b 1
     )
-    echo [4/4] 注册 Openlist Watchdog...
+    echo [4/4] 注册 Openlist Watchdog（S4U / Session 0）...
     call :register_task "%TASK_OPENLIST%" Openlist "%OPENLIST_GUARD%" "%OPENLIST_MUTEX%"
     if errorlevel 1 (
         echo   [FAIL] Openlist Watchdog 注册失败，已终止
@@ -228,7 +230,7 @@ if /i "%TARGET%"=="all" (
         exit /b 1
     )
     echo.
-    echo 完成：Cpolar + Openlist 已配置【开机自启 + 运行时保活】双重保障
+    echo 完成：Cpolar + Openlist 已配置【运行时保活】Watchdog（guard 由 Watchdog 在后台托管）
     exit /b
 )
 
@@ -243,33 +245,33 @@ set "TARGET=%~1"
 if "%TARGET%"=="" set "TARGET=all"
 
 if /i "%TARGET%"=="Cpolar" (
-    echo === 一键移除 Cpolar（开机自启 + Watchdog） ===
+    echo === 一键移除 Cpolar（Watchdog 保活 + 旧自启） ===
     if exist "%CPOLAR_AUTOSTART%" (
         echo [1/2] 移除 Cpolar 开机自启...
         call "%CPOLAR_AUTOSTART%" remove
     ) else (
-        echo [WARN] Cpolar\AutoStart.bat 未找到，跳过开机自启
+        echo [WARN] Cpolar\AutoStart.bat 未找到，跳过自启清理
     )
     echo [2/2] 移除 Cpolar Watchdog...
     call :remove_task "%TASK_CPOLAR%"
-    echo 完成：Cpolar 开机自启和运行时保活已移除
+    echo 完成：Cpolar 运行时保活和旧开机自启已移除
     exit /b
 )
 if /i "%TARGET%"=="Openlist" (
-    echo === 一键移除 Openlist（开机自启 + Watchdog） ===
+    echo === 一键移除 Openlist（Watchdog 保活 + 旧自启） ===
     if exist "%OPENLIST_AUTOSTART%" (
         echo [1/2] 移除 Openlist 开机自启...
         call "%OPENLIST_AUTOSTART%" remove
     ) else (
-        echo [WARN] Openlist\AutoStart.bat 未找到，跳过开机自启
+        echo [WARN] Openlist\AutoStart.bat 未找到，跳过自启清理
     )
     echo [2/2] 移除 Openlist Watchdog...
     call :remove_task "%TASK_OPENLIST%"
-    echo 完成：Openlist 开机自启和运行时保活已移除
+    echo 完成：Openlist 运行时保活和旧开机自启已移除
     exit /b
 )
 if /i "%TARGET%"=="all" (
-    echo === 一键移除全部（开机自启 + Watchdog） ===
+    echo === 一键移除全部（Watchdog 保活 + 旧自启） ===
     if exist "%CPOLAR_AUTOSTART%" (
         echo [1/4] 移除 Cpolar 开机自启...
         call "%CPOLAR_AUTOSTART%" remove
@@ -283,7 +285,7 @@ if /i "%TARGET%"=="all" (
     echo [4/4] 移除 Openlist Watchdog...
     call :remove_task "%TASK_OPENLIST%"
     echo.
-    echo 完成：所有开机自启和运行时保活已移除
+    echo 完成：所有运行时保活和旧开机自启已移除
     exit /b
 )
 
