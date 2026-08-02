@@ -6,6 +6,10 @@ Openlist/bin/data/
 Openlist/logs/guard.log
 Openlist/logs/guard.log.*
 
+# 忽略 Cpolar 守护日志（按周轮转归档，不纳入版本控制）
+Cpolar/logs/guard.log
+Cpolar/logs/guard.log.*
+
 # 忽略 Openlist 大文件（通过发布包单独分发）
 Openlist/openlist.exe
 Openlist/bin/*.exe

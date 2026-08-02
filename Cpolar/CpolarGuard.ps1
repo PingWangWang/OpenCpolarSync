@@ -69,6 +69,11 @@ function Write-GuardLog {
     $logLine = "[$timestamp] [$Level] $Message"
 
     try {
+        # [修改] 日志目录可能缺失（Openlist/logs 未随仓库分发），先确保目录存在
+        $logDir = Split-Path -Parent $logFile
+        if (-not (Test-Path -Path $logDir)) {
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        }
         Add-Content -Path $logFile -Value $logLine -Encoding UTF8 -ErrorAction Stop
     } catch {
         Write-Host "[LOG-WRITE-FAILED] $logLine" -ForegroundColor Yellow
