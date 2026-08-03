@@ -74,6 +74,7 @@ AutoStart.bat
 - 启动时自动检测管理员权限，非管理员通过 UAC RunAs 提权重启
 - 添加自启：创建指向 `OpenlistGuard.ps1` 的快捷方式到 `shell:startup`
 - 删除自启：从 `shell:startup` 移除对应快捷方式
+- 支持命令行静默模式（供 Watchdog 等外部调用）：`AutoStart.bat add` / `AutoStart.bat remove`
 
 ## 快速开始
 
@@ -95,15 +96,10 @@ AutoStart.bat
 Openlist/
 +-- OpenlistGuard.ps1         # 常驻守护脚本（60秒轮询 + 自动重启）
 +-- AutoStart.bat             # 开机自启管理（添加/删除）
-+-- bin/
-|   +-- openlist.exe          # 文件管理服务程序
++-- openlist.exe              # 文件管理服务程序（手动放置）
 +-- archive/
 |   +-- openlist.zip          # 发布压缩包
-+-- data/
-|   +-- config.json           # 服务配置
-|   +-- data.db               # SQLite 数据库
-|   +-- log/log.log           # 运行日志
-|   +-- temp/                 # 临时文件目录
++-- data/                     # 运行时自动创建（配置/数据库/日志/临时文件）
 +-- logs/                     # 守护脚本日志（自动轮转）
 +-- README.md
 ```
@@ -121,4 +117,9 @@ Openlist/
 
 ## 关联项目
 
-- **[Cpolar](../Cpolar/)** - 同一仓库下的 Cpolar 隧道状态监控 Tampermonkey 脚本。
+- **[Cpolar](../Cpolar/)** - 同一仓库下的 Cpolar 隧道状态监控（PowerShell 常驻守护脚本，钉钉推送）。
+- **[Watchdog](../Watchdog/)** - 运行时保活看门狗，通过计划任务自动拉起异常的 Guard 进程。
+
+## 📝 License
+
+[MIT](../LICENSE)

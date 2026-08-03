@@ -28,10 +28,10 @@ WatchdogManager.bat setup all
 
 运行后，依次完成：
 
-1. 注册开机自启（Cpolar + Openlist 的 `shell:startup` 快捷方式）
-2. 注册计划任务（每 5 分钟巡检一次）
+1. 清理旧的 `shell:startup` 开机自启（guard 改由 Watchdog 托管）
+2. 注册计划任务（每 5 分钟巡检一次，S4U 非交互会话运行）
 
-之后每次登录，guard 自动启动；运行中若进程意外退出，**最多 5 分钟** 内自动恢复。
+之后 guard 不再依赖登录自启，由 Watchdog 在后台托管；运行中若进程意外退出，**最多 5 分钟** 内自动恢复，注销或未登录状态下保活依然生效。
 
 ---
 
@@ -65,11 +65,14 @@ powershell -ExecutionPolicy Bypass -File GuardCheck.ps1 `
 **执行逻辑**：
 
 ```
-① 尝试创建同名 Global Mutex
+① 每次巡检先写一条 INFO 日志（Watchdog tick for <GuardName>）
+② 尝试创建同名 Global Mutex
   ├─ 创建成功（guard 已退出）→ 写 RESTART 日志 → Start-Process 拉起 guard
-  └─ 创建失败（guard 正常运行）→ 静默退出，不写日志避免噪声
-② 无论分支，退出前 Dispose() 释放 Mutex 句柄
+  └─ 创建失败（guard 正常运行）→ 不写 RESTART 日志，避免噪声
+③ 无论分支，退出前 Dispose() 释放 Mutex 句柄
 ```
+
+日志级别：`INFO`（每次巡检）、`RESTART`（拉起操作）、`ERROR`（异常）。
 
 ### WatchdogManager.bat
 
@@ -81,9 +84,9 @@ powershell -ExecutionPolicy Bypass -File GuardCheck.ps1 `
 ====================================
   1. 一键配置全部（Cpolar + Openlist）
   2. 一键移除全部
-  3. 仅配置 Cpolar（开机自启 + 保活）
+  3. 仅配置 Cpolar（Watchdog 保活）
   4. 仅移除 Cpolar
-  5. 仅配置 Openlist（开机自启 + 保活）
+  5. 仅配置 Openlist（Watchdog 保活）
   6. 仅移除 Openlist
   7. 查看状态
 ====================================
@@ -127,13 +130,19 @@ WatchdogManager.bat status             # 查看状态
           │ YES     │ NO       │
           │(guard死)│(guard活) │
           ▼         ▼
-    Start-Process    静默
-    CpolarGuard.ps1  exit 0
-          │
+    Start-Process    仅记 INFO
+    CpolarGuard.ps1  tick 日志
+          │        （无 RESTART）
           ▼
     watchdog.log
-    [RESTART] CpolarGuard 已拉起 (PID=1234)
+    [RESTART] Cpolar Guard 已拉起 (PID=1234)
 ```
+
+### S4U 非交互运行（Session 0）
+
+计划任务以 **S4U（LogonType）** 注册，任务在 Session 0 非交互会话中运行，控制台窗口根本不创建——根治了每 5 分钟 tick 弹窗的问题；guard 也由登录自启改为 Watchdog 在后台托管拉起，消除了登录早期 guard 弹窗且不自动关闭的问题。
+
+guard 脚本无会话依赖（仅 localhost HTTP、出网 Webhook、文件与进程操作），Session 0 下功能不受影响；S4U 不携带网络凭据，但不涉及受保护网络资源。注销或未登录时保活依然生效（行为增强）。
 
 ### 双引号/路径容错
 
@@ -173,8 +182,9 @@ Get-Content .\watchdog.log -Tail 5
   [*] OpenlistGuard — 运行中
 
 [恢复日志] (C:\...\watchdog.log)
-  2026-07-30 10:06:06 [RESTART] CpolarGuard 不在运行，正在尝试拉起...
-  2026-07-30 10:06:08 [RESTART] CpolarGuard 已拉起 (PID=1234)
+  2026-07-30 10:06:01 [INFO] Watchdog tick for Cpolar
+  2026-07-30 10:06:06 [RESTART] Cpolar Guard 不在运行，正在尝试拉起...
+  2026-07-30 10:06:08 [RESTART] Cpolar Guard 已拉起 (PID=1234)
 ```
 
 ---
