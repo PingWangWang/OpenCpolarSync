@@ -1,10 +1,10 @@
 # OpenCpolarSync
 
-> Windows 平台实用工具集：Cpolar 隧道状态监控 + openlist 文件管理服务管理
+> Windows 平台实用工具集：Cpolar 隧道状态监控 + openlist 文件管理服务 + 运行时保活看门狗
 
 ![GitHub](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/version-1.1.0-orange)
+![Version](https://img.shields.io/badge/version-1.2.0-orange)
 
 ## 项目简介
 
@@ -25,19 +25,20 @@ OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三�
 适合使用 [Cpolar](https://www.cpolar.com) 内网穿透工具、需要实时获知隧道状态变更的开发者。
 
 - `CpolarGuard.ps1` — 常驻守护脚本，轮询 Cpolar 后端 API，自动推送钉钉通知
-- `AutoStart.bat` — 交互式菜单，添加/删除开机自启（UAC 提权 + shell:startup 快捷方式）
+- `AutoStart.bat` — 交互式菜单，添加/删除开机自启（UAC 提权 + shell:startup 快捷方式，支持命令行静默模式）
 - **无需浏览器**，不依赖 Tampermonkey
-- 智能去重，无变化不重复推送
+- 用户名密码自动登录，Token 过期自动重新登录
+- 智能去重，无变化不重复推送；配置变更热重载
 - 日志按 ISO 周轮转归档
 
-**安装方式**：编辑 `config.json` 填入 Webhook URL 和 Token，运行 `AutoStart.bat` 设置开机自启即可。
+**安装方式**：编辑 `config.json` 填入 Webhook URL 和 Cpolar 登录邮箱/密码（脚本自动登录），运行 `AutoStart.bat` 设置开机自启即可。
 
 ### [Openlist 服务管理 →](./Openlist/)
 
 适合在 Windows 上使用 [Alist](https://github.com/AlistGo/alist) 文件管理服务、需要便捷启动和开机自启的用户。
 
 - `OpenlistGuard.ps1` — 常驻守护脚本，60秒轮询监控进程，崩溃自动重启
-- `AutoStart.bat` — 交互式菜单，添加/删除开机自启（UAC 提权 + shell:startup 快捷方式）
+- `AutoStart.bat` — 交互式菜单，添加/删除开机自启（UAC 提权 + shell:startup 快捷方式，支持命令行静默模式）
 - 服务默认访问地址：`http://localhost:5244`
 
 **安装方式**：下载后先解压 `archive/openlist.zip`，将 `openlist.exe` 放到 `Openlist/` 目录（与脚本同目录），详情见 [Openlist README](./Openlist/)。
@@ -47,11 +48,12 @@ OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三�
 适合所有需要 **运行时保活** 的用户。当 CpolarGuard / OpenlistGuard 的 PowerShell 进程异常退出时自动拉起，确保持续在线。
 
 - `GuardCheck.ps1` — 通用巡检脚本，通过 Mutex 判活，参数化设计一份脚本服务两个模块
-- `WatchdogManager.bat` — 统一管理入口，一键配置（开机自启 + 运行时保活）
+- `WatchdogManager.bat` — 统一管理入口，一键配置（清理旧开机自启 + S4U 计划任务运行时保活）
 - **零第三方依赖** — 完全利用 Windows 内置 Task Scheduler
+- **S4U 非交互运行** — 任务在 Session 0 执行，无控制台弹窗，注销/未登录时保活依然生效
 - **容错路径** — 支持仓库安装在带空格的目录下
 
-**安装方式**：以管理员身份运行 `watchdog\WatchdogManager.bat`，选 `1` 一键配置全部即可。
+**安装方式**：以管理员身份运行 `watchdog\WatchdogManager.bat`，选 `1` 一键配置全部（清理旧开机自启 + 注册 S4U 计划任务）即可。
 
 ---
 
@@ -75,7 +77,7 @@ OpenCpolarSync/
 ├── Openlist/                   # openlist 服务管理脚本
 │   ├── OpenlistGuard.ps1       # 常驻守护脚本（60秒轮询+自动重启）
 │   ├── AutoStart.bat           # 开机自启管理（添加/删除）
-│   ├── bin/                    # 可执行文件
+│   ├── openlist.exe            # 文件管理服务程序（手动放置）
 │   ├── archive/                # 发布包
 │   ├── data/                   # 配置、数据库、日志
 │   ├── logs/                   # 守护脚本日志
@@ -94,8 +96,8 @@ OpenCpolarSync/
 
 ## 前置条件
 
-- **Cpolar 监控**：Windows PowerShell 5.0+，拥有 Cpolar Web 管理界面权限（`localhost:9200`），已创建钉钉机器人 Webhook
-- **Openlist 服务**：Windows 系统，管理员权限（用于守护脚本和开机自启管理）
+- **Cpolar 监控**：Windows PowerShell 5.0+，拥有 Cpolar Web 管理界面权限（`localhost:9200`），已创建钉钉机器人 Webhook，并在 `config.json` 中配置 Cpolar 登录邮箱/密码
+- **Openlist 服务**：Windows PowerShell 5.0+（守护脚本无需管理员权限；`AutoStart.bat` 自启管理需要）
 - **Watchdog 看门狗**：Windows 系统，管理员权限（用于注册计划任务）
 
 ## 🤝 贡献
