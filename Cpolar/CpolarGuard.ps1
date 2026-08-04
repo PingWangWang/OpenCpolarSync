@@ -325,6 +325,37 @@ function Fetch-Tunnels {
     $result = $apiResponse.Parsed
     $rawJson = $apiResponse.Raw
 
+    # [修改] 业务错误码处理：cpolar API 以 HTTP 200 + code 字段表示业务结果，
+    #       非 20000（成功码）必须视为失败并返回 $null——否则 50014（token 过期）
+    #       等错误响应会被解析成空隧道列表，误触发"全部隧道离线"推送
+    $apiCode = if ($result.PSObject.Properties.Name -contains 'code') { $result.code } else { $null }
+    $apiMsg  = if ($result.PSObject.Properties.Name -contains 'message') { $result.message } else { "" }
+
+    if ($apiCode -ne 20000) {
+        if ($apiCode -eq 50014) {
+            # token 过期（业务错误码，非 HTTP 401）→ 重新登录后重试一次
+            Write-GuardLog -Level "WARN" -Message "Token 已过期（code=50014: $apiMsg），尝试重新登录..."
+            $script:apiToken = Login-Cpolar -Config $Config
+            if (-not $script:apiToken) {
+                Write-GuardLog -Level "ERROR" -Message "重新登录失败，请检查 config/config.json 中的 username 和 password"
+                return $null
+            }
+            $apiResponse = Invoke-CpolarApi -Url $apiUrl -Token $script:apiToken -Method "header"
+            if (-not $apiResponse) {
+                Write-GuardLog -Level "WARN" -Message "重新登录后 API 请求仍失败（HTTP 层）"
+                return $null
+            }
+            $result = $apiResponse.Parsed
+            $rawJson = $apiResponse.Raw
+            $apiCode = if ($result.PSObject.Properties.Name -contains 'code') { $result.code } else { $null }
+            $apiMsg  = if ($result.PSObject.Properties.Name -contains 'message') { $result.message } else { "" }
+        }
+        if ($apiCode -ne 20000) {
+            Write-GuardLog -Level "WARN" -Message "API 返回错误码 code=$($apiCode): $apiMsg，跳过本轮"
+            return $null
+        }
+    }
+
     # Normalize response to tunnel array
     # Cpolar API returns: { code:20000, message:"", data:{ total:N, items:[...] } }
     $tunnels = $null
@@ -945,6 +976,14 @@ while ($true) {
 
     # 无任何匹配隧道 → 检查是否有历史数据需要离线通知
     if ($selectedTunnels.Count -eq 0) {
+        # [修改] 兜底：API 处于连续失败状态时，空列表不可信（可能是错误响应被解析成空），
+        #       禁止触发"全部隧道离线"检测，直接跳过本轮
+        if ($global:apiHistory.consecutiveFails -gt 0) {
+            Write-GuardLog -Level "CHECK" -Message "API 连续失败中（$($global:apiHistory.consecutiveFails) 次），空列表不可信，跳过离线检测"
+            $global:isFirstRun = $false
+            Start-Sleep -Seconds $global:pollInterval
+            continue
+        }
         # 检查 lastData 是否有历史记录（last-sent.json 中缓存的隧道）
         $hasHistorical = $global:lastData -and (@($global:lastData).Count -gt 0)
 
