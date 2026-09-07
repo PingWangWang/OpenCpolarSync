@@ -1,19 +1,70 @@
-# 忽略 Openlist 数据目录（配置、数据库、日志、临时文件）
-Openlist/data/
-Openlist/bin/data/
+# ============================================================
+# OpenCpolarSync .gitignore
+# ============================================================
 
-# 忽略 Openlist 守护日志（按周轮转归档，不纳入版本控制）
-Openlist/logs/guard.log
-Openlist/logs/guard.log.*
+# ---------- Visual Studio / WPF 编译输出 ----------
+src/**/bin/
+src/**/obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
 
-# 忽略 Cpolar 守护日志（按周轮转归档，不纳入版本控制）
-Cpolar/logs/guard.log
-Cpolar/logs/guard.log.*
+# ---------- Visual Studio 缓存 ----------
+.vs/
+.vscode/
+.idea/
 
-# 忽略 Openlist 大文件（通过发布包单独分发）
-Openlist/openlist.exe
-Openlist/bin/*.exe
-Openlist/bin/*.7z
-Openlist/bin/*.tar.gz
-Openlist/archive/*.7z
-Openlist/archive/*.tar.gz
+# ---------- NuGet ----------
+packages/
+*.nupkg
+**/packages/*
+!**/packages/build/
+
+# ---------- 安装包输出 ----------
+installer/Output/
+*.exe
+
+# ---------- 日志文件 ----------
+**/logs/*.log
+**/logs/*.log.*
+**/watchdog.log
+
+# ---------- Openlist 数据目录（配置、数据库、日志、临时文件） ----------
+legacy/Openlist/data/
+legacy/Openlist/bin/data/
+
+# ---------- Openlist 大文件（通过发布包单独分发） ----------
+legacy/Openlist/openlist.exe
+legacy/Openlist/bin/*.exe
+legacy/Openlist/bin/*.7z
+legacy/Openlist/bin/*.tar.gz
+legacy/Openlist/archive/*.7z
+legacy/Openlist/archive/*.tar.gz
+legacy/Openlist/archive/*.zip
+
+# ---------- Cpolar 安装包 ----------
+legacy/Cpolar/installer/*.msi
+
+# ---------- 运行时生成的配置/状态文件 ----------
+legacy/Cpolar/config/last-sent.json
+# 忽略所有包含隐私数据的配置文件（webhook/邮箱/密码等）
+**/config.json
+!**/config.template.json
+
+# ---------- 系统文件 ----------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------- 临时文件 ----------
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# ---------- 压缩包（根目录） ----------
+*.7z
+*.rar

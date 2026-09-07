@@ -1,0 +1,53 @@
+﻿<UserControl x:Class="OpenCpolarSync.Client.Views.OpenlistConfigTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="500" d:DesignWidth="600"
+             Background="{DynamicResource BgSecondary}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24">
+        <StackPanel>
+            <TextBlock Text="配置 Openlist(alist) 文件服务的管理员登录密码" FontSize="13" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,12"/>
+
+            <Border Style="{StaticResource CardStaticStyle}" Margin="0,0,0,8">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,8">
+                        <Border Width="4" Height="18" Background="{DynamicResource BrandBrush}" CornerRadius="2" VerticalAlignment="Center"/>
+                        <TextBlock Text="Openlist 管理" FontSize="14" FontWeight="700" Foreground="{DynamicResource TextPrimary}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    </DockPanel>
+
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="150"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="管理用户名" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource TextSecondary}"/>
+                        <TextBox Grid.Column="1" Text="admin" IsReadOnly="True" Background="{DynamicResource BgTertiary}"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="150"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="登录密码" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource TextSecondary}"/>
+                        <Grid Grid.Column="1">
+                            <PasswordBox x:Name="TxtOpenlistPassword" PasswordChanged="TxtOpenlistPassword_PasswordChanged"/>
+                            <TextBox x:Name="TxtOpenlistPasswordVisible" Visibility="Collapsed" TextChanged="TxtOpenlistPasswordVisible_TextChanged"/>
+                        </Grid>
+                        <CheckBox x:Name="ChkOpenlistShowPassword" Grid.Column="2" Content="显示" VerticalAlignment="Center" Margin="10,0,0,0" Checked="ChkOpenlistShowPassword_Checked" Unchecked="ChkOpenlistShowPassword_Unchecked"/>
+                    </Grid>
+
+                    <TextBlock Text="说明：openlist(alist) 管理员用户名固定为 admin，不可修改；此处填写的密码将用于设置其登录密码。保存且 openlist 未运行时自动应用（未初始化会自动初始化）。" FontSize="11" Foreground="{DynamicResource TextTertiary}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                <Button x:Name="BtnSave" Content="保存配置" Style="{StaticResource PrimaryButton}" Margin="0,0,10,0" Click="BtnSave_Click"/>
+                <Button x:Name="BtnReset" Content="重置" Style="{StaticResource SecondaryButton}" Click="BtnReset_Click"/>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

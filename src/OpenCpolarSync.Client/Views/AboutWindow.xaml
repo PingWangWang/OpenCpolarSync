@@ -1,0 +1,108 @@
+﻿<Window x:Class="OpenCpolarSync.Client.Views.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="关于 OpenCpolarSync" Height="480" Width="520"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="{DynamicResource BgPrimary}"
+        FontFamily="{StaticResource AppFont}"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        ShowInTaskbar="False">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 顶部品牌区 -->
+        <Border Grid.Row="0" Background="{DynamicResource BrandBrush}" Padding="28,24">
+            <DockPanel>
+                <Border Width="52" Height="52" CornerRadius="14" Background="White" Opacity="0.15" VerticalAlignment="Center"/>
+                <TextBlock Text="O" FontSize="28" FontWeight="Bold" Foreground="White" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="16,0,0,0" Panel.ZIndex="1"/>
+                <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="OpenCpolarSync" FontSize="22" FontWeight="700" Foreground="White"/>
+                    <TextBlock x:Name="TxtVersion" Text="v1.0.0" FontSize="13" Foreground="#C7D2FE" Margin="0,2,0,0"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- 内容区 -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="28,20">
+            <StackPanel>
+                <TextBlock Text="核心功能" FontSize="13" FontWeight="700" Foreground="{DynamicResource TextTertiary}" Margin="0,0,0,12"/>
+
+                <!-- 功能项 -->
+                <Border Background="{DynamicResource BgSecondary}" CornerRadius="8" Padding="14,12" Margin="0,0,0,8">
+                    <DockPanel>
+                        <Border Width="28" Height="28" CornerRadius="6" Background="{DynamicResource InfoBgBrush}" VerticalAlignment="Center">
+                            <TextBlock Text="⬡" FontSize="14" Foreground="{DynamicResource InfoBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel Margin="10,0,0,0">
+                            <TextBlock Text="Cpolar 隧道监控" FontSize="13" FontWeight="600" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock Text="自动登录 API，轮询隧道状态，变更时钉钉实时推送告警" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <Border Background="{DynamicResource BgSecondary}" CornerRadius="8" Padding="14,12" Margin="0,0,0,8">
+                    <DockPanel>
+                        <Border Width="28" Height="28" CornerRadius="6" Background="{DynamicResource BrandLightBrush}" VerticalAlignment="Center">
+                            <TextBlock Text="◈" FontSize="14" Foreground="{DynamicResource BrandBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel Margin="10,0,0,0">
+                            <TextBlock Text="Openlist 进程守护" FontSize="13" FontWeight="600" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock Text="60 秒轮询进程状态，崩溃后自动重启，确保服务持续可用" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <Border Background="{DynamicResource BgSecondary}" CornerRadius="8" Padding="14,12" Margin="0,0,0,8">
+                    <DockPanel>
+                        <Border Width="28" Height="28" CornerRadius="6" Background="{DynamicResource SuccessBgBrush}" VerticalAlignment="Center">
+                            <TextBlock Text="▣" FontSize="14" Foreground="{DynamicResource SuccessBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel Margin="10,0,0,0">
+                            <TextBlock Text="系统托盘驻留" FontSize="13" FontWeight="600" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock Text="关闭窗口最小化到托盘，右键快捷操作，后台持续守护" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <Border Background="{DynamicResource BgSecondary}" CornerRadius="8" Padding="14,12" Margin="0,0,0,8">
+                    <DockPanel>
+                        <Border Width="28" Height="28" CornerRadius="6" Background="{DynamicResource WarningBgBrush}" VerticalAlignment="Center">
+                            <TextBlock Text="⬇" FontSize="14" Foreground="{DynamicResource WarningBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel Margin="10,0,0,0">
+                            <TextBlock Text="一键安装部署" FontSize="13" FontWeight="600" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock Text="安装包集成 cpolar 静默安装和 openlist 解压，自动检测避免重复" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <!-- 技术栈 -->
+                <Border Background="{DynamicResource BgTertiary}" CornerRadius="8" Padding="14,12" Margin="0,8,0,0">
+                    <StackPanel>
+                        <TextBlock Text="技术栈" FontSize="11" FontWeight="700" Foreground="{DynamicResource TextTertiary}" Margin="0,0,0,4"/>
+                        <TextBlock Text=".NET Framework 4.8 · WPF · Hardcodet.NotifyIcon · Newtonsoft.Json · Inno Setup" FontSize="11" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- 底部 -->
+        <Border Grid.Row="2" Background="{DynamicResource BgPrimary}" BorderBrush="{DynamicResource BorderLightBrush}" BorderThickness="0,1,0,0" Padding="28,14">
+            <DockPanel>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Copyright © 2026 PingWang" FontSize="11" Foreground="{DynamicResource TextTertiary}"/>
+                    <TextBlock x:Name="TxtBuildTime" Text="" FontSize="10" Foreground="{DynamicResource TextTertiary}" Opacity="0.7"/>
+                </StackPanel>
+                <Button Content="关闭" Width="84" Height="32" HorizontalAlignment="Right" Style="{StaticResource PrimaryButton}" Click="BtnClose_Click"/>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

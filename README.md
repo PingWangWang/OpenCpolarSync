@@ -1,109 +1,187 @@
 # OpenCpolarSync
 
-> Windows 平台实用工具集：Cpolar 隧道状态监控 + openlist 文件管理服务 + 运行时保活看门狗
+> Windows 桌面工具：Cpolar 隧道状态监控 + Openlist 文件服务进程守护，WPF 一体化安装版
 
-![GitHub](https://img.shields.io/badge/platform-Windows-lightgrey)
+![Platform](https://img.shields.io/badge/platform-Windows%207%20SP1%2B-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/version-1.2.0-orange)
+![Version](https://img.shields.io/badge/version-1.1.22-orange)
+![.NET](https://img.shields.io/badge/.NET-Framework%204.8-blueviolet)
 
 ## 项目简介
 
-OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三个独立子模块：
+OpenCpolarSync 是一个面向 Windows 用户的桌面工具，将 **Cpolar 隧道监控** 和 **Openlist 文件服务守护** 整合为一个 WPF 应用，提供图形化配置、实时状态展示、Web 管理内嵌和系统托盘保活。
 
-| 子模块 | 用途 | 技术栈 |
-|--------|------|--------|
-| **[Cpolar](./Cpolar/)** | 自动监控 Cpolar 在线隧道状态，变更时通过钉钉 Webhook 推送通知 | Windows Batch / PowerShell |
-| **[Openlist](./Openlist/)** | openlist（基于 Alist）文件管理服务的常驻守护、开机自启管理 | Windows Batch / PowerShell |
-| **[Watchdog](./watchdog/)** | 运行时保活看门狗，Guard 进程异常退出时自动拉起 | Windows Batch / PowerShell |
-
----
-
-## 📦 快速导航
-
-### [Cpolar 隧道状态同步 →](./Cpolar/)
-
-适合使用 [Cpolar](https://www.cpolar.com) 内网穿透工具、需要实时获知隧道状态变更的开发者。
-
-- `CpolarGuard.ps1` — 常驻守护脚本，轮询 Cpolar 后端 API，自动推送钉钉通知
-- `AutoStart.bat` — 交互式菜单，添加/删除开机自启（UAC 提权 + shell:startup 快捷方式，支持命令行静默模式）
-- **无需浏览器**，不依赖 Tampermonkey
-- 用户名密码自动登录，Token 过期自动重新登录
-- 智能去重，无变化不重复推送；配置变更热重载
-- 日志按 ISO 周轮转归档
-
-**安装方式**：编辑 `config.json` 填入 Webhook URL 和 Cpolar 登录邮箱/密码（脚本自动登录），运行 `AutoStart.bat` 设置开机自启即可。
-
-### [Openlist 服务管理 →](./Openlist/)
-
-适合在 Windows 上使用 [Alist](https://github.com/AlistGo/alist) 文件管理服务、需要便捷启动和开机自启的用户。
-
-- `OpenlistGuard.ps1` — 常驻守护脚本，60秒轮询监控进程，崩溃自动重启
-- `AutoStart.bat` — 交互式菜单，添加/删除开机自启（UAC 提权 + shell:startup 快捷方式，支持命令行静默模式）
-- 服务默认访问地址：`http://localhost:5244`
-
-**安装方式**：下载后先解压 `archive/openlist.zip`，将 `openlist.exe` 放到 `Openlist/` 目录（与脚本同目录），详情见 [Openlist README](./Openlist/)。
-
-### [Watchdog 看门狗 →](./watchdog/)
-
-适合所有需要 **运行时保活** 的用户。当 CpolarGuard / OpenlistGuard 的 PowerShell 进程异常退出时自动拉起，确保持续在线。
-
-- `GuardCheck.ps1` — 通用巡检脚本，通过 Mutex 判活，参数化设计一份脚本服务两个模块
-- `WatchdogManager.bat` — 统一管理入口，一键配置（清理旧开机自启 + S4U 计划任务运行时保活）
-- **零第三方依赖** — 完全利用 Windows 内置 Task Scheduler
-- **S4U 非交互运行** — 任务在 Session 0 执行，无控制台弹窗，注销/未登录时保活依然生效
-- **容错路径** — 支持仓库安装在带空格的目录下
-
-**安装方式**：以管理员身份运行 `watchdog\WatchdogManager.bat`，选 `1` 一键配置全部（清理旧开机自启 + 注册 S4U 计划任务）即可。
+| 功能 | 说明 |
+|------|------|
+| **Cpolar 隧道监控** | 自动登录 Cpolar Web API，轮询隧道状态，检测上线/离线/变更，通过钉钉机器人实时推送 |
+| **Openlist 进程守护** | 60 秒轮询 openlist.exe 进程，崩溃后自动以 `server` 参数重启 |
+| **图形化配置** | 内置配置表单（Webhook、轮询间隔、隧道名、账号密码等），支持校验和热重载 |
+| **Web 管理内嵌** | 通过 WebView2 内嵌 Cpolar（localhost:9200）和 Openlist（localhost:5244）管理界面，Win7 无 Runtime 时自动降级为外部浏览器 |
+| **系统托盘** | 关闭主窗口自动最小化到托盘，右键菜单支持启动/停止守护、打开 Web 管理、退出 |
+| **一键安装** | Inno Setup 安装包集成 cpolar MSI 静默安装和 openlist 绿色包解压，检测已安装状态避免重复安装 |
 
 ---
 
-## 📁 仓库结构
+## 快速开始
+
+### 环境要求
+
+- Windows 7 SP1 / 8.1 / 10 / 11
+- .NET Framework 4.8（Win7 需手动安装，Win10 1803+ 自带）
+- WebView2 Runtime（Win10 1803+ 自带，Win7 需单独安装；未安装时自动降级为外部浏览器）
+- Visual Studio 2022（编译用，MSBuild 17.x）
+
+### 编译
+
+```powershell
+# Debug 编译
+.\scripts\build-debug.ps1
+
+# Release 编译
+.\scripts\build-release.ps1
+```
+
+编译输出位于 `src\OpenCpolarSync.Client\bin\{Debug|Release}\`。
+
+### 打包安装程序
+
+```powershell
+# 需先完成 Release 编译，并安装 Inno Setup 6.x
+.\scripts\package.ps1
+```
+
+安装包输出位于 `installer\Output\OpenCpolarSync-Setup_1.1.22.exe`。
+
+### 运行
+
+编译后直接运行 `OpenCpolarSync.exe`，或通过安装包安装后从开始菜单/桌面快捷方式启动。
+
+首次运行需在「Cpolar 配置」Tab 中填写钉钉 Webhook、Cpolar 登录账号等信息，保存后点击「启动全部守护」。
+
+---
+
+## 项目结构
 
 ```
 OpenCpolarSync/
-├── watchdog/                    # 运行时保活看门狗
-│   ├── GuardCheck.ps1          # 通用巡检脚本（Task Scheduler 触发）
-│   ├── WatchdogManager.bat     # 统一管理入口（安装/卸载/状态）
-│   ├── README.md               # 看门狗说明文档
-│   └── watchdog.log            # 恢复日志（自动生成）
-├── Cpolar/                     # Cpolar 隧道状态监控（守护脚本）
-│   ├── CpolarGuard.ps1         # 常驻守护脚本
-│   ├── AutoStart.bat           # 开机自启管理
-│   ├── config/                 # 配置与快照
-│   ├── logs/                   # 运行日志（自动轮转）
-│   ├── archive/                # 旧版油猴脚本等参考文件
-│   ├── installer/              # Cpolar 安装包
-│   └── README.md
-├── Openlist/                   # openlist 服务管理脚本
-│   ├── OpenlistGuard.ps1       # 常驻守护脚本（60秒轮询+自动重启）
-│   ├── AutoStart.bat           # 开机自启管理（添加/删除）
-│   ├── openlist.exe            # 文件管理服务程序（手动放置）
-│   ├── archive/                # 发布包
-│   ├── data/                   # 配置、数据库、日志
-│   ├── logs/                   # 守护脚本日志
-│   └── README.md
-├── LICENSE                     # MIT License
-└── README.md                   # 本文件
+├── src/                              # WPF 源码
+│   ├── OpenCpolarSync.Client.sln     # 解决方案
+│   └── OpenCpolarSync.Client/        # WPF 项目（.NET Framework 4.8）
+│       ├── App.xaml / .cs             # 应用入口（单实例 Mutex + 全局异常）
+│       ├── MainWindow.xaml / .cs      # 主窗口（4 Tab + 托盘 + 关于）
+│       ├── Models/                     # 数据模型
+│       │   ├── CpolarConfig.cs         # 配置模型（JSON 序列化）
+│       │   ├── TunnelInfo.cs           # 隧道信息模型
+│       │   └── ServiceStatus.cs        # 服务状态枚举 + 事件参数
+│       ├── Services/                   # 核心业务服务
+│       │   ├── GuardService.cs         # 统一调度（Cpolar + Openlist + 钉钉推送）
+│       │   ├── CpolarMonitor.cs        # Cpolar API 监控（JWT 登录 + 隧道轮询 + 变更检测）
+│       │   ├── OpenlistMonitor.cs      # Openlist 进程守护（60s 轮询 + 崩溃重启）
+│       │   ├── ConfigService.cs        # 配置读写 + 校验 + 热重载
+│       │   ├── DingTalkService.cs      # 钉钉机器人 Markdown 推送
+│       │   └── InstallDetectionService.cs  # cpolar/openlist/WebView2 安装检测
+│       ├── Components/                 # UI 组件
+│       │   ├── TrayIcon.cs             # 系统托盘（Hardcodet.NotifyIcon）
+│       │   └── WebView2Manager.cs      # WebView2 初始化 + Win7 降级
+│       ├── ViewModels/                 # 视图模型
+│       │   ├── MainViewModel.cs
+│       │   ├── DashboardViewModel.cs
+│       │   └── CpolarConfigViewModel.cs
+│       └── Views/                      # 页面视图
+│           ├── DashboardTab.xaml / .cs      # 总览（服务状态 + 快捷操作）
+│           ├── CpolarConfigTab.xaml / .cs   # Cpolar 配置表单 + Web 管理入口
+│           ├── OpenlistTab.xaml / .cs       # Openlist Web 管理（WebView2 内嵌）
+│           ├── LogsTab.xaml / .cs           # 运行日志查看
+│           └── AboutWindow.xaml / .cs       # 关于对话框（版本 + 功能介绍）
+├── scripts/                          # 编译/打包脚本
+│   ├── build-debug.ps1                # Debug 编译（环境检查 + 还原 + 编译）
+│   ├── build-release.ps1              # Release 编译（环境检查 + 清理 + 还原 + 编译）
+│   └── package.ps1                    # 安装包打包（环境检查 + ISCC 编译）
+├── installer/                        # 安装包
+│   └── setup.iss                      # Inno Setup 脚本（集成 cpolar MSI + openlist.zip）
+├── docs/                             # 设计文档
+│   └── WPF-Installer-Design.md       # WPF 安装版设计方案（方案对比 + 模块划分）
+├── legacy/                           # 旧版项目归档（PowerShell / Batch 脚本）
+│   ├── Cpolar/                        # 旧版 Cpolar 模块
+│   ├── Openlist/                      # 旧版 Openlist 模块
+│   ├── Watchdog/                      # 旧版 Watchdog 保活模块
+│   ├── scripts/                       # 旧版守护脚本（6 个 .ps1/.bat）
+│   └── README.md                      # 归档说明
+├── LICENSE
+└── README.md                          # 本文件
 ```
 
 ---
 
-## ❓ 适用场景
+## 技术栈
 
-- **内网穿透运维** — 通过 Cpolar 暴露本地服务后，需要实时监控隧道状态并推送到钉钉群
-- **团队协作** — 多人共用一个 Cpolar 账号，通过钉钉机器人同步隧道变更
-- **Windows 文件管理** — 在 Windows 上部署 Alist 文件管理服务，需要便捷的启动和开机自启方案
+| 类别 | 技术 |
+|------|------|
+| 框架 | .NET Framework 4.8 |
+| UI | WPF (XAML + MVVM 轻量模式) |
+| 内嵌浏览器 | Microsoft.Web.WebView2 |
+| 系统托盘 | Hardcodet.NotifyIcon.Wpf |
+| JSON | Newtonsoft.Json |
+| HTTP | System.Net.Http (HttpClient) |
+| 安装包 | Inno Setup 6.x |
+| 构建脚本 | PowerShell 5.1+ |
 
-## 前置条件
+---
 
-- **Cpolar 监控**：Windows PowerShell 5.0+，拥有 Cpolar Web 管理界面权限（`localhost:9200`），已创建钉钉机器人 Webhook，并在 `config.json` 中配置 Cpolar 登录邮箱/密码
-- **Openlist 服务**：Windows PowerShell 5.0+（守护脚本无需管理员权限；`AutoStart.bat` 自启管理需要）
-- **Watchdog 看门狗**：Windows 系统，管理员权限（用于注册计划任务）
+## 核心流程
 
-## 🤝 贡献
+### Cpolar 隧道监控
 
-欢迎提交 Issue 或 Pull Request。每个子项目有独立的 README，建议先阅读对应文档。
+```
+启动守护 → 自动登录 Cpolar API（邮箱+密码 → JWT Token）
+        → 按配置间隔轮询 /api/v1/tunnels
+        → 筛选勾选的隧道，复合键(name|protocol)比对上次快照
+        → 检测到变更（新增/更新/重连/离线）→ 构建 Markdown 消息 → 钉钉推送
+        → Token 过期自动重新登录
+```
 
-## 📝 License
+### Openlist 进程守护
+
+```
+启动守护 → 检查 openlist.exe 进程 → 未运行则以 `server` 参数启动
+        → 每 60 秒轮询进程状态 → 进程消失则自动重启
+        → 重启后等待 15 秒确认存活
+```
+
+### 安装流程
+
+```
+运行安装包 → 检测 cpolar 是否已安装（注册表+默认路径）
+          → 未安装则静默执行 cpolar_amd64.msi
+          → 解压 openlist.zip 到安装目录
+          → 复制主程序及依赖、默认 config.json
+          → 创建开始菜单/桌面快捷方式（可选）
+          → 可选注册开机自启
+          → 安装完成后可选启动主程序
+```
+
+---
+
+## 旧版说明
+
+项目早期由三个独立的 PowerShell / Batch 脚本模块组成（CpolarGuard、OpenlistGuard、Watchdog），现已全部用 C# 重写并整合为 WPF 桌面应用。
+
+旧版脚本及资源文件统一归档在 [`legacy/`](./legacy/) 目录下，仅供参考和回退使用，不再主动维护。详见 [legacy/README.md](./legacy/README.md)。
+
+---
+
+## 适用场景
+
+- **内网穿透运维** — 通过 Cpolar 暴露本地服务，需要实时监控隧道状态并推送到钉钉群
+- **家庭/小型团队文件服务** — 在 Windows 上部署 Openlist/Alist 文件管理，需要进程保活和便捷管理
+- **一体化运维工具** — 希望用一个图形化工具同时管理隧道监控和文件服务，避免多个脚本窗口
+
+---
+
+## 贡献
+
+欢迎提交 Issue 或 Pull Request。设计方案详见 [`docs/WPF-Installer-Design.md`](./docs/WPF-Installer-Design.md)。
+
+## License
 
 [MIT](./LICENSE) © 2026 PingWang

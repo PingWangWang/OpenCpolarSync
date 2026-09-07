@@ -1,0 +1,46 @@
+PS C:\Users\Administrator> cpolar --help
+Usage of http:
+  -authtoken string
+        Authentication token for identifying an cpolar.com account
+  -client-cas string
+        tls client crt file
+  -config string
+        Path to cpolar configuration file. (default: $HOME/.cpolar/cpolar.yml)
+  -crt string
+        cpolar tls crt file
+  -daemon string
+        daemon process run default is off
+  -dashboard string
+        dashboard web ui default is off
+  -disable-keep-alives string
+        disable proxy keep alive for website service, default is false (default "false")
+  -host-header string
+        cpolar can rewrite your requests with a modified Host header
+  -hostname string
+        Request a custom hostname from the cpolar server. (HTTP only) (requires CNAME of your DNS)
+  -httpauth string
+        username:password HTTP basic auth creds protecting the public tunnel endpoint
+  -inspect-addr string
+        inspect Addr,default 127.0.0.1:4040，false is close
+  -key string
+        cpolar tls key file
+  -log string
+        Write log messages to this file. 'stdout' and 'none' have special meanings (default "none")
+  -log-level string
+        The level of messages to log. One of: DEBUG, INFO, WARNING, ERROR (default "DEBUG")
+  -logRotationCount uint
+        log RotationCount default 20 (default 20)
+  -processMode string
+        process run mode, 当daemon=on时，默认master双进程模式，当在前台运行时daemon=off时，默认为single单进程模式，但也会有期特殊组合，例如，当daemon=on时，如果设置了processMode=single，则为后台程序，且为单进程运行方式，这种场景应用在有第三系统自己的守护进程来管理cpolar工作进程，而master进程并不工作，也可以用于调试场景。
+  -proto string
+        The protocol of the traffic over the tunnel {'http', 'https', 'tcp'} (default: 'http+https') (default "http+https")
+  -redirect-https string
+        redirect http to https Tunnel, default is false (default "false")
+  -region string
+        Choose the region where the cpolar client will connect to host its tunnels. default us
+  -remote-addr string
+        bind remote address (requires you reserve an address)
+  -subdomain string
+        Request a custom subdomain from the cpolar server. (HTTP only)
+  -tunnelName string
+        default tunnel name (default "default")

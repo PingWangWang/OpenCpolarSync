@@ -1,0 +1,156 @@
+<Window x:Class="OpenCpolarSync.Client.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:views="clr-namespace:OpenCpolarSync.Client.Views"
+        mc:Ignorable="d"
+        Title="OpenCpolarSync" Height="680" Width="960"
+        MinHeight="560" MinWidth="820"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource BgPrimary}"
+        Icon="app.ico"
+        FontFamily="{StaticResource AppFont}"
+        TextElement.Foreground="{DynamicResource TextPrimary}"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        RenderOptions.ClearTypeHint="Enabled"
+        Closing="Window_Closing">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ==================== 左侧导航栏 ==================== -->
+        <Border Grid.Column="0" Background="{DynamicResource BgSidebar}" BorderBrush="{DynamicResource BorderLightBrush}" BorderThickness="0,0,1,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- 品牌区 -->
+                <Border Grid.Row="0" Padding="20,20,20,16">
+                    <StackPanel Orientation="Horizontal">
+                        <Border Width="36" Height="36" CornerRadius="9" Background="{DynamicResource BrandBrush}">
+                            <TextBlock Text="O" FontSize="20" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="OpenCpolarSync" FontSize="14" FontWeight="700" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock Text="服务守护管理" FontSize="11" Foreground="{DynamicResource TextTertiary}" Margin="0,1,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- 导航菜单 -->
+                <StackPanel Grid.Row="1" Margin="12,8,12,0">
+                    <TextBlock Text="导航" FontSize="11" FontWeight="600" Foreground="{DynamicResource TextTertiary}" Margin="8,0,0,6"/>
+                    <Button x:Name="NavDashboard" Content="  总览" Style="{StaticResource NavItemActiveStyle}" Click="NavDashboard_Click" Tag="dashboard">
+                        <Button.ContentTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="▣" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBlock Text="总览" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </Button.ContentTemplate>
+                    </Button>
+                    <Button x:Name="NavCpolar" Content="  Cpolar 配置" Style="{StaticResource NavItemStyle}" Click="NavCpolar_Click" Margin="0,2,0,0">
+                        <Button.ContentTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="⚙" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBlock Text="Cpolar 配置" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </Button.ContentTemplate>
+                    </Button>
+                    <Button x:Name="NavOpenlist" Content="  Openlist 配置" Style="{StaticResource NavItemStyle}" Click="NavOpenlist_Click" Margin="0,2,0,0">
+                        <Button.ContentTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="◈" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBlock Text="Openlist 配置" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </Button.ContentTemplate>
+                    </Button>
+                    <Button x:Name="NavLogs" Content="  日志" Style="{StaticResource NavItemStyle}" Click="NavLogs_Click" Margin="0,2,0,0">
+                        <Button.ContentTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="≡" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBlock Text="日志" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </Button.ContentTemplate>
+                    </Button>
+                </StackPanel>
+
+                <!-- 底部：关于 + 状态 -->
+                <Border Grid.Row="2" Padding="12,12">
+                    <StackPanel>
+                        <Border Background="{DynamicResource BgTertiary}" CornerRadius="8" Padding="12,10" Margin="0,0,0,8">
+                            <StackPanel>
+                                <TextBlock Text="全局状态" FontSize="10" FontWeight="600" Foreground="{DynamicResource TextTertiary}"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                    <Ellipse x:Name="GlobalStatusDot" Width="8" Height="8" Fill="{DynamicResource TextTertiary}" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="TxtGlobalStatus" Text="待启动" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Button x:Name="BtnAbout" Content="关于 OpenCpolarSync" Style="{StaticResource GhostButton}" HorizontalAlignment="Stretch" Click="BtnAbout_Click"/>
+                        <TextBlock Text="v1.1.22" FontSize="10" Foreground="{DynamicResource TextTertiary}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- ==================== 右侧内容区 ==================== -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="56"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- 顶部标题栏 -->
+            <Border Grid.Row="0" Background="{DynamicResource BgPrimary}" BorderBrush="{DynamicResource BorderLightBrush}" BorderThickness="0,0,0,1" Padding="24,0">
+                <DockPanel>
+                    <TextBlock x:Name="TxtPageTitle" Text="服务总览" FontSize="17" FontWeight="700" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <!-- 主题切换按钮 -->
+                        <Button x:Name="BtnThemeToggle" Style="{StaticResource IconButton}" Width="34" Height="34" Margin="0,0,10,0" Click="BtnThemeToggle_Click" ToolTip="切换深色/浅色模式">
+                            <Grid Width="20" Height="20">
+                                <!-- 月亮图标（浅色模式下显示，表示可切换到深色） -->
+                                <Path x:Name="IconMoon" Data="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"
+                                      Stretch="Uniform"
+                                      Stroke="{DynamicResource TextSecondary}" StrokeThickness="1.8" Fill="Transparent"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                                <!-- 太阳图标（深色模式下显示，表示可切换到浅色） -->
+                                <Path x:Name="IconSun" Data="M12 17.5A5.5 5.5 0 1 1 12 6.5a5.5 5.5 0 0 1 0 11ZM12 1.5v2M12 20.5v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1.5 12h2M20.5 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+                                      Stretch="Uniform"
+                                      Stroke="{DynamicResource TextSecondary}" StrokeThickness="1.8" Fill="Transparent"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                      Visibility="Collapsed"/>
+                            </Grid>
+                        </Button>
+                        <Button x:Name="BtnStartAllTop" Content="启动全部守护" Style="{StaticResource PrimaryButton}" Margin="0,0,8,0" Click="BtnStartAllTop_Click"/>
+                        <Button x:Name="BtnStopAllTop" Content="停止全部" Style="{StaticResource SecondaryButton}" Click="BtnStopAllTop_Click"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- 页面内容 -->
+            <Grid Grid.Row="1" Background="{DynamicResource BgSecondary}">
+                <views:DashboardTab x:Name="DashboardTab" Visibility="Visible"/>
+                <views:CpolarConfigTab x:Name="CpolarConfigTab" Visibility="Collapsed"/>
+                <views:OpenlistConfigTab x:Name="OpenlistConfigTab" Visibility="Collapsed"/>
+                <views:LogsTab x:Name="LogsTab" Visibility="Collapsed"/>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

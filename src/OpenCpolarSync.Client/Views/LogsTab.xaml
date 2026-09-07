@@ -1,0 +1,34 @@
+﻿<UserControl x:Class="OpenCpolarSync.Client.Views.LogsTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="400" d:DesignWidth="600"
+             Background="{DynamicResource BgSecondary}">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock Text="实时记录守护服务的运行日志，便于排查问题" FontSize="13" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
+            <Button x:Name="BtnClear" Content="清空日志" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Right" Click="BtnClear_Click"/>
+        </DockPanel>
+
+        <Border Grid.Row="1" Style="{StaticResource CardStaticStyle}" Padding="0" CornerRadius="10">
+            <TextBox x:Name="TxtLogs"
+                     IsReadOnly="True"
+                     Background="#1E1E2E"
+                     Foreground="#CDD6F4"
+                     FontFamily="Consolas, monospace"
+                     FontSize="12"
+                     TextWrapping="NoWrap"
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Auto"
+                     Padding="16"
+                     BorderThickness="0"/>
+        </Border>
+    </Grid>
+</UserControl>
