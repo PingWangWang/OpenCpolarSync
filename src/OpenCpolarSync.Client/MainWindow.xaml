@@ -89,6 +89,16 @@
                             </DataTemplate>
                         </Button.ContentTemplate>
                     </Button>
+                    <Button x:Name="NavSettings" Content="  设置" Style="{StaticResource NavItemStyle}" Click="NavSettings_Click" Margin="0,2,0,0">
+                        <Button.ContentTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="⚙" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBlock Text="设置" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </Button.ContentTemplate>
+                    </Button>
                 </StackPanel>
 
                 <!-- 底部：关于 + 状态 -->
@@ -104,7 +114,7 @@
                             </StackPanel>
                         </Border>
                         <Button x:Name="BtnAbout" Content="关于 OpenCpolarSync" Style="{StaticResource GhostButton}" HorizontalAlignment="Stretch" Click="BtnAbout_Click"/>
-                        <TextBlock Text="v1.1.22" FontSize="10" Foreground="{DynamicResource TextTertiary}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                        <TextBlock Text="v1.1.24" FontSize="10" Foreground="{DynamicResource TextTertiary}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                     </StackPanel>
                 </Border>
             </Grid>
@@ -150,6 +160,7 @@
                 <views:CpolarConfigTab x:Name="CpolarConfigTab" Visibility="Collapsed"/>
                 <views:OpenlistConfigTab x:Name="OpenlistConfigTab" Visibility="Collapsed"/>
                 <views:LogsTab x:Name="LogsTab" Visibility="Collapsed"/>
+                <views:SettingsTab x:Name="SettingsTab" Visibility="Collapsed"/>
             </Grid>
         </Grid>
     </Grid>

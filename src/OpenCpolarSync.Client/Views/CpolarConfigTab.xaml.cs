@@ -1,12 +1,15 @@
-﻿using System.Windows;
+﻿using System.IO;
+using System.Windows;
 using System.Windows.Controls;
+using Microsoft.Win32;
+using Newtonsoft.Json;
 using OpenCpolarSync.Client.Models;
 using OpenCpolarSync.Client.ViewModels;
 
 namespace OpenCpolarSync.Client.Views
 {
     /// <summary>
-    /// CpolarConfigTab.xaml 的交互逻辑 — Cpolar 配置页面，支持配置编辑和保存
+    /// CpolarConfigTab.xaml 的交互逻辑 — Cpolar 配置页面，支持配置编辑、保存、导出、导入
     /// </summary>
     public partial class CpolarConfigTab : UserControl
     {
@@ -80,6 +83,78 @@ namespace OpenCpolarSync.Client.Views
             _viewModel.Debug = false;
             TxtPassword.Password = "";
             TxtPasswordVisible.Text = "";
+        }
+
+        /// <summary>
+        /// 导出配置到 JSON 文件
+        /// </summary>
+        private void BtnExport_Click(object sender, RoutedEventArgs e)
+        {
+            var config = _viewModel.ToConfig();
+            var json = JsonConvert.SerializeObject(config, Formatting.Indented);
+
+            var dialog = new SaveFileDialog
+            {
+                Filter = "JSON 配置文件 (*.json)|*.json|所有文件 (*.*)|*.*",
+                FileName = "cpolar-config.json",
+                Title = "导出 Cpolar 配置"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                try
+                {
+                    File.WriteAllText(dialog.FileName, json);
+                    MessageBox.Show("配置已导出到：\n" + dialog.FileName, "导出成功",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (IOException ex)
+                {
+                    MessageBox.Show("导出失败：" + ex.Message, "错误",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 从 JSON 文件导入配置
+        /// </summary>
+        private void BtnImport_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new OpenFileDialog
+            {
+                Filter = "JSON 配置文件 (*.json)|*.json|所有文件 (*.*)|*.*",
+                Title = "导入 Cpolar 配置"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                try
+                {
+                    var json = File.ReadAllText(dialog.FileName);
+                    var config = JsonConvert.DeserializeObject<CpolarConfig>(json);
+                    if (config == null)
+                    {
+                        MessageBox.Show("配置文件格式无效，无法解析。", "导入失败",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+
+                    LoadConfig(config);
+                    MessageBox.Show("配置已导入，请点击「保存配置」使其生效。", "导入成功",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (JsonException ex)
+                {
+                    MessageBox.Show("配置文件解析失败：" + ex.Message, "导入失败",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                catch (IOException ex)
+                {
+                    MessageBox.Show("读取文件失败：" + ex.Message, "导入失败",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
         }
 
         /// <summary>

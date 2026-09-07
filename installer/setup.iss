@@ -3,7 +3,7 @@
 ; 编译命令：ISCC.exe setup.iss
 
 #define MyAppName "OpenCpolarSync"
-#define MyAppVersion "1.1.22"
+#define MyAppVersion "1.1.24"
 #define MyAppPublisher "PingWang"
 #define MyAppExeName "OpenCpolarSync.exe"
 

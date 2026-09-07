@@ -6,23 +6,23 @@
              mc:Ignorable="d"
              d:DesignHeight="500" d:DesignWidth="700"
              Background="{DynamicResource BgSecondary}">
-    <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,16">
-        <Grid MinHeight="{Binding ActualHeight, ElementName=PageScroll}">
+    <Border Padding="24,16" Background="{DynamicResource BgSecondary}">
+        <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
-            <StackPanel Grid.Row="0">
-                <!-- 页面说明 -->
-                <TextBlock Text="实时监控 Cpolar 隧道与 Openlist 文件服务的运行状态" FontSize="13" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,12"/>
 
-            <!-- 服务卡片：固定两列布局，确保始终在同一行 -->
-            <Grid Margin="0,0,0,8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="16"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
+        <!-- 页面说明 -->
+        <TextBlock Grid.Row="0" Text="实时监控 Cpolar 隧道与 Openlist 文件服务的运行状态" FontSize="13" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,12"/>
+
+        <!-- 服务卡片：固定两列布局，确保始终在同一行 -->
+        <Grid Grid.Row="1" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
                 <!-- Cpolar 卡片 -->
                 <Border Grid.Column="0" Style="{StaticResource CardStyle}">
                     <StackPanel>
@@ -120,8 +120,6 @@
                     </StackPanel>
                 </Border>
             </Grid>
-            </StackPanel>
-
         </Grid>
-    </ScrollViewer>
+    </Border>
 </UserControl>

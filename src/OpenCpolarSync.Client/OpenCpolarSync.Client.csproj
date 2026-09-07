@@ -81,6 +81,10 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="Views\SettingsTab.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Page Include="Views\AboutWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
@@ -104,6 +108,9 @@
     </Compile>
     <Compile Include="Views\LogsTab.xaml.cs">
       <DependentUpon>LogsTab.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Views\SettingsTab.xaml.cs">
+      <DependentUpon>SettingsTab.xaml</DependentUpon>
     </Compile>
     <Compile Include="Views\AboutWindow.xaml.cs">
       <DependentUpon>AboutWindow.xaml</DependentUpon>

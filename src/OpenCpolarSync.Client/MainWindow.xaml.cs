@@ -498,6 +498,7 @@ namespace OpenCpolarSync.Client
         private void NavCpolar_Click(object sender, RoutedEventArgs e) => NavigateTo("cpolar");
         private void NavOpenlist_Click(object sender, RoutedEventArgs e) => NavigateTo("openlist");
         private void NavLogs_Click(object sender, RoutedEventArgs e) => NavigateTo("logs");
+        private void NavSettings_Click(object sender, RoutedEventArgs e) => NavigateTo("settings");
 
         private void NavigateTo(string page)
         {
@@ -509,6 +510,7 @@ namespace OpenCpolarSync.Client
             CpolarConfigTab.Visibility = page == "cpolar" ? Visibility.Visible : Visibility.Collapsed;
             OpenlistConfigTab.Visibility = page == "openlist" ? Visibility.Visible : Visibility.Collapsed;
             LogsTab.Visibility = page == "logs" ? Visibility.Visible : Visibility.Collapsed;
+            SettingsTab.Visibility = page == "settings" ? Visibility.Visible : Visibility.Collapsed;
 
             // 顶部「启动/停止全部守护」仅总览页面显示
             var showTopActions = page == "dashboard";
@@ -520,6 +522,7 @@ namespace OpenCpolarSync.Client
             SetNavActive(NavCpolar, page == "cpolar");
             SetNavActive(NavOpenlist, page == "openlist");
             SetNavActive(NavLogs, page == "logs");
+            SetNavActive(NavSettings, page == "settings");
 
             // 更新页面标题
             switch (page)
@@ -528,6 +531,7 @@ namespace OpenCpolarSync.Client
                 case "cpolar": TxtPageTitle.Text = "Cpolar 配置"; break;
                 case "openlist": TxtPageTitle.Text = "Openlist 配置"; break;
                 case "logs": TxtPageTitle.Text = "运行日志"; break;
+                case "settings": TxtPageTitle.Text = "设置"; break;
             }
         }
 
