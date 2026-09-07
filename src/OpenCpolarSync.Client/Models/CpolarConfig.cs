@@ -63,10 +63,28 @@ namespace OpenCpolarSync.Client.Models
         public string OpenlistPassword { get; set; } = "";
 
         /// <summary>
-        /// 界面主题（Light / Dark）
+        /// 界面主题（Light / Dark / Auto）
         /// </summary>
         [JsonProperty("theme")]
         public string Theme { get; set; } = "Light";
+
+        /// <summary>
+        /// 关闭窗口时的行为（Quit / Tray / Ask）
+        /// </summary>
+        [JsonProperty("closeMode")]
+        public string CloseMode { get; set; } = "Ask";
+
+        /// <summary>
+        /// 窗口背景效果（None / Acrylic / Mica / MicaAlt）
+        /// </summary>
+        [JsonProperty("backgroundEffect")]
+        public string BackgroundEffect { get; set; } = "Mica";
+
+        /// <summary>
+        /// 开机自启后自动启动守护
+        /// </summary>
+        [JsonProperty("autoStartGuard")]
+        public bool AutoStartGuard { get; set; } = false;
 
         /// <summary>
         /// 深拷贝当前配置

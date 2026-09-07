@@ -1,0 +1,22 @@
+﻿<UserControl x:Class="OpenCpolarSync.Client.Components.MaskDialog"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="200" d:DesignWidth="400">
+    <Border Background="{DynamicResource BgPrimary}" CornerRadius="12" Padding="24"
+            BorderBrush="{DynamicResource BorderLightBrush}" BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect Color="#000000" Opacity="0.15" BlurRadius="20" ShadowDepth="4"/>
+        </Border.Effect>
+        <StackPanel>
+            <TextBlock x:Name="TitleText" FontSize="16" FontWeight="700" Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,8"/>
+            <TextBlock x:Name="ContentText" FontSize="13" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,20"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="CancelButton" Content="取消" Style="{DynamicResource SecondaryButton}" Margin="0,0,8,0" Click="CancelButton_Click"/>
+                <Button x:Name="YesButton" Content="确定" Style="{DynamicResource PrimaryButton}" Click="YesButton_Click"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</UserControl>

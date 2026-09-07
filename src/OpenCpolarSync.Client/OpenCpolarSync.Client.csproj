@@ -89,6 +89,14 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="Components\InfoBar.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Components\MaskDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Compile Include="App.xaml.cs">
       <DependentUpon>App.xaml</DependentUpon>
       <SubType>Code</SubType>
@@ -127,6 +135,14 @@
     <Compile Include="Services\InstallDetectionService.cs" />
     <Compile Include="Services\ThemeManager.cs" />
     <Compile Include="Components\TrayIcon.cs" />
+    <Compile Include="Components\WindowEffect.cs" />
+    <Compile Include="Components\InfoBarManager.cs" />
+    <Compile Include="Components\InfoBar.xaml.cs">
+      <DependentUpon>InfoBar.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Components\MaskDialog.xaml.cs">
+      <DependentUpon>MaskDialog.xaml</DependentUpon>
+    </Compile>
     <Compile Include="ViewModels\MainViewModel.cs" />
     <Compile Include="ViewModels\DashboardViewModel.cs" />
     <Compile Include="ViewModels\CpolarConfigViewModel.cs" />

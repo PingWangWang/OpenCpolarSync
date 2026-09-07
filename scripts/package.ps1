@@ -20,7 +20,7 @@ if (-not (Test-Path (Join-Path $ProjectRoot "src\OpenCpolarSync.Client.sln"))) {
 $InstallerDir = Join-Path $ProjectRoot "installer"
 $SetupScript = Join-Path $InstallerDir "setup.iss"
 $OutputDir = Join-Path $InstallerDir "Output"
-$Version = "1.1.24"
+$Version = "1.1.29"
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  OpenCpolarSync - 安装包打包" -ForegroundColor Cyan

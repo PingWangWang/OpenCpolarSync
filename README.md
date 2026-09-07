@@ -4,7 +4,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-Windows%207%20SP1%2B-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/version-1.1.24-orange)
+![Version](https://img.shields.io/badge/version-1.1.29-orange)
 ![.NET](https://img.shields.io/badge/.NET-Framework%204.8-blueviolet)
 
 ## 项目简介
@@ -50,7 +50,7 @@ OpenCpolarSync 是一个面向 Windows 用户的桌面工具，将 **Cpolar 隧�
 .\scripts\package.ps1
 ```
 
-安装包输出位于 `installer\Output\OpenCpolarSync-Setup_1.1.24.exe`。
+安装包输出位于 `installer\Output\OpenCpolarSync-Setup_1.1.29.exe`。
 
 ### 运行
 

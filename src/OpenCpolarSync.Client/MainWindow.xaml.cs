@@ -29,7 +29,6 @@ namespace OpenCpolarSync.Client
         private bool _isExiting;
         private string _currentPage = "dashboard";
         private DispatcherTimer _pidRefreshTimer;
-        private bool _themeInitialized;
 
         public MainWindow()
         {
@@ -45,10 +44,13 @@ namespace OpenCpolarSync.Client
 
                 Loaded += MainWindow_Loaded;
                 StartPidRefresh();
-                // 应用保存的主题（用户选择持久化），此时深色开关事件尚未就绪，不会触发保存
+                // [Fluent] 应用保存的主题（从配置读取，支持 Light/Dark/Auto）
                 ApplySavedTheme();
-                // 深色开关在初始化阶段可能触发事件，标记就绪后再允许响应，避免误切换主题
-                _themeInitialized = true;
+
+                // [Fluent] 初始化 InfoBar 通知管理器
+                InfoBarManager.Initialize(this);
+                // [Fluent] 注册系统主题变化监听（Auto 模式）
+                ThemeManager.SystemThemeChanged += OnSystemThemeChanged;
             }
             catch (Exception ex)
             {
@@ -108,6 +110,7 @@ namespace OpenCpolarSync.Client
                 {
                     _currentConfig = config;
                     CpolarConfigTab.LoadConfig(config);
+                    SettingsTab.SetConfig(config);
                     _guardService.UpdateCpolarConfig(config);
                     LogsTab.AppendLog("配置已热重载");
                 });
@@ -188,6 +191,14 @@ namespace OpenCpolarSync.Client
         {
             CpolarConfigTab.SaveConfigRequested += (s, e) => SaveConfig();
             OpenlistConfigTab.SaveConfigRequested += (s, e) => SaveOpenlistConfig();
+            // [Fluent] 设置页配置变更时自动保存
+            SettingsTab.ConfigChanged += (s, e) =>
+            {
+                if (_currentConfig != null)
+                {
+                    _configService.Save(_currentConfig);
+                }
+            };
         }
 
         public static void OpenUrl(string url)
@@ -208,6 +219,7 @@ namespace OpenCpolarSync.Client
             _currentConfig = _configService.Load();
             CpolarConfigTab.LoadConfig(_currentConfig);
             OpenlistConfigTab.LoadConfig(_currentConfig);
+            SettingsTab.SetConfig(_currentConfig);
         }
 
         private void SaveConfig()
@@ -228,8 +240,8 @@ namespace OpenCpolarSync.Client
                 _guardService.UpdateCpolarConfig(config);
                 UpdateStatus("配置已保存");
                 LogsTab.AppendLog("配置已保存");
-
-                MessageBox.Show("配置保存成功！", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                // [Fluent] 使用 InfoBar 通知替代 MessageBox
+                InfoBarManager.Success("配置已保存", "Cpolar 配置已更新并生效");
             }
             else
             {
@@ -256,12 +268,14 @@ namespace OpenCpolarSync.Client
             UpdateStatus("Openlist 配置已保存");
             LogsTab.AppendLog("[Openlist] 配置已保存");
 
+            bool passwordApplied = false;
             if (string.IsNullOrEmpty(password))
             {
                 LogsTab.AppendLog("[Openlist] 未填写密码，未应用");
             }
             else if (_guardService.OpenlistMonitor.SetAdminPassword(password))
             {
+                passwordApplied = true;
                 UpdateStatus("openlist 管理密码已更新");
                 LogsTab.AppendLog("[Openlist] openlist 管理密码已应用");
             }
@@ -270,7 +284,8 @@ namespace OpenCpolarSync.Client
                 LogsTab.AppendLog("[Openlist] openlist 管理密码应用失败；配置已保存，可停止 openlist 守护后重新保存重试");
             }
 
-            MessageBox.Show("Openlist 配置保存成功！", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+            // [Fluent] 使用 InfoBar 通知替代 MessageBox
+            InfoBarManager.Success("Openlist 配置已保存", passwordApplied ? "管理密码已应用" : "配置已保存");
         }
 
         private void StartAllGuards()
@@ -380,6 +395,63 @@ namespace OpenCpolarSync.Client
                 if (!openlistDeployed) missing += "Openlist ";
                 UpdateStatus($"警告：{missing}未安装/部署");
             }
+
+            // [Fluent] 应用窗口背景效果（Mica/Acrylic）
+            ApplyBackgroundEffect();
+
+            // [自动恢复] 如果配置了开机自启后自动启动守护，则自动启动
+            if (_currentConfig != null && _currentConfig.AutoStartGuard)
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try { StartAllGuards(); }
+                    catch (Exception ex) { LogsTab.AppendLog($"自动启动守护失败: {ex.Message}"); }
+                }), DispatcherPriority.Background);
+            }
+        }
+
+        /// <summary>
+        /// [Fluent] 应用配置中的窗口背景效果
+        /// </summary>
+        private void ApplyBackgroundEffect()
+        {
+            try
+            {
+                var effectStr = _currentConfig?.BackgroundEffect ?? "Mica";
+                if (Enum.TryParse<BackgroundEffect>(effectStr, true, out var effect))
+                {
+                    var isDark = ThemeManager.IsDark(_currentConfig?.Theme ?? "Light");
+                    var success = WindowEffect.SetBackgroundEffect(this, effect, isDark);
+                    // Mica/Acrylic 效果需要窗口背景透明才能显示；设置成功后将窗口背景设为透明
+                    if (success && effect != BackgroundEffect.None)
+                    {
+                        Background = Brushes.Transparent;
+                    }
+                    else
+                    {
+                        // 无效果或设置失败时恢复纯色背景
+                        var bgColor = (Color)ColorConverter.ConvertFromString("#0F172A");
+                        if (!isDark) bgColor = (Color)ColorConverter.ConvertFromString("#FFFFFF");
+                        Background = new SolidColorBrush(bgColor);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// [Fluent] 系统主题变化时（Auto 模式）重新应用主题和背景效果
+        /// </summary>
+        private void OnSystemThemeChanged(object sender, EventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                if (string.Equals(_currentConfig?.Theme, "Auto", StringComparison.OrdinalIgnoreCase))
+                {
+                    ThemeManager.Apply("Auto");
+                    ApplyBackgroundEffect();
+                }
+            });
         }
 
         private void Window_Closing(object sender, CancelEventArgs e)
@@ -427,9 +499,26 @@ namespace OpenCpolarSync.Client
             Topmost = true;
             Topmost = false;
 
-            var result = MessageBox.Show(this, "确定要退出 OpenCpolarSync 吗？退出后所有守护将停止。",
-                "确认退出", MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (result == MessageBoxResult.Yes)
+            // [Fluent] 关闭行为配置：Quit=直接退出, Tray=最小化到托盘, Ask=询问（默认）
+            var mode = _currentConfig?.CloseMode ?? "Ask";
+            if (string.Equals(mode, "Quit", StringComparison.OrdinalIgnoreCase))
+            {
+                _isExiting = true;
+                Close();
+                return;
+            }
+            if (string.Equals(mode, "Tray", StringComparison.OrdinalIgnoreCase))
+            {
+                Hide();
+                return;
+            }
+
+            // Ask 模式：使用 MaskDialog 遮罩对话框
+            var dialog = new MaskDialog(this,
+                "确认退出",
+                "确定要退出 OpenCpolarSync 吗？退出后所有守护将停止。",
+                "退出程序", "最小化到托盘");
+            if (dialog.ShowDialog() == MessageBoxResult.Yes)
             {
                 _isExiting = true;
                 Close();
@@ -449,45 +538,13 @@ namespace OpenCpolarSync.Client
 
         /// <summary>
         /// 主题切换按钮点击：在浅色/深色模式间切换
-        /// </summary>
-        private void BtnThemeToggle_Click(object sender, RoutedEventArgs e)
-        {
-            if (!_themeInitialized) return;
-            var current = _currentConfig?.Theme ?? "Light";
-            var isDark = string.Equals(current, "Dark", StringComparison.OrdinalIgnoreCase);
-            var newTheme = isDark ? "Light" : "Dark";
-            SetTheme(newTheme);
-            UpdateThemeIcon(newTheme);
-        }
-
         /// <summary>
-        /// 更新主题切换按钮的图标（浅色模式显示月亮，深色模式显示太阳）
-        /// </summary>
-        private void UpdateThemeIcon(string theme)
-        {
-            var isDark = string.Equals(theme, "Dark", StringComparison.OrdinalIgnoreCase);
-            if (IconMoon != null) IconMoon.Visibility = isDark ? Visibility.Collapsed : Visibility.Visible;
-            if (IconSun != null) IconSun.Visibility = isDark ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        /// <summary>
-        /// 应用主题并持久化到配置
-        /// </summary>
-        private void SetTheme(string theme)
-        {
-            ThemeManager.Apply(theme);
-            _currentConfig.Theme = theme;
-            _configService.Save(_currentConfig);
-        }
-
-        /// <summary>
-        /// 启动时应用配置中保存的主题
+        /// 启动时应用配置中保存的主题（支持 Light/Dark/Auto）
         /// </summary>
         private void ApplySavedTheme()
         {
             var saved = _currentConfig?.Theme ?? "Light";
             ThemeManager.Apply(saved);
-            UpdateThemeIcon(saved);
         }
 
         private void BtnStartAllTop_Click(object sender, RoutedEventArgs e) => StartAllGuards();
@@ -524,20 +581,20 @@ namespace OpenCpolarSync.Client
             SetNavActive(NavLogs, page == "logs");
             SetNavActive(NavSettings, page == "settings");
 
-            // 更新页面标题
+            // 更新页面标题和副标题
             switch (page)
             {
-                case "dashboard": TxtPageTitle.Text = "服务总览"; break;
-                case "cpolar": TxtPageTitle.Text = "Cpolar 配置"; break;
-                case "openlist": TxtPageTitle.Text = "Openlist 配置"; break;
-                case "logs": TxtPageTitle.Text = "运行日志"; break;
-                case "settings": TxtPageTitle.Text = "设置"; break;
+                case "dashboard": TxtPageTitle.Text = "服务总览"; TxtPageSubtitle.Text = "实时监控 Cpolar 隧道与 Openlist 文件服务"; break;
+                case "cpolar": TxtPageTitle.Text = "Cpolar 配置"; TxtPageSubtitle.Text = "配置隧道监控参数与钉钉推送通知"; break;
+                case "openlist": TxtPageTitle.Text = "Openlist 配置"; TxtPageSubtitle.Text = "管理 Openlist 文件服务的登录密码"; break;
+                case "logs": TxtPageTitle.Text = "运行日志"; TxtPageSubtitle.Text = "实时记录守护服务的运行日志"; break;
+                case "settings": TxtPageTitle.Text = "设置"; TxtPageSubtitle.Text = "管理开机自启动、外观与关闭行为"; break;
             }
         }
 
         private void SetNavActive(Button btn, bool active)
         {
-            btn.Style = active ? (Style)FindResource("NavItemActiveStyle") : (Style)FindResource("NavItemStyle");
+            btn.Style = active ? (Style)FindResource("FluentNavItemActive") : (Style)FindResource("FluentNavItem");
         }
     }
 }
