@@ -461,8 +461,11 @@ function Invoke-ConfigWizard {
         if ($Silent) {
             $Values.CpolarUser = $default
         } else {
+            if ($default) {
+                Write-Host "  当前值：$default" -ForegroundColor Gray
+            }
             $prompt = 'Cpolar Web 登录邮箱'
-            if ($default) { $prompt += "（回车保留 $default）" }
+            if ($default) { $prompt += '（回车保留当前值）' }
             $input = Read-Host $prompt
             $Values.CpolarUser = if ($input) { $input } else { $default }
         }
@@ -517,7 +520,12 @@ function Invoke-ConfigWizard {
         if ($Silent) {
             $Values.TunnelNames = @($default)
         } else {
-            $input = Read-Host "要监控的隧道名，多个用逗号分隔（默认 $default）"
+            if ($default) {
+                Write-Host "  当前值：$default" -ForegroundColor Gray
+            }
+            $prompt = '要监控的隧道名，多个用逗号分隔'
+            if ($default) { $prompt += '（回车保留当前值）' }
+            $input = Read-Host $prompt
             $Values.TunnelNames = if ($input) {
                 @($input -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
             } else { @($default) }
@@ -530,7 +538,10 @@ function Invoke-ConfigWizard {
         if ($Silent) {
             $Values.Interval = $default
         } else {
-            $input = Read-Host "轮询间隔（分钟，默认 $default）"
+            Write-Host "  当前值：$default 分钟" -ForegroundColor Gray
+            $prompt = '轮询间隔（分钟）'
+            if ($default) { $prompt += '（回车保留当前值）' }
+            $input = Read-Host $prompt
             $Values.Interval = if ($input -match '^\d+$') { [int]$input } else { $default }
         }
     }
