@@ -274,8 +274,9 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 
 1. **`raw.githubusercontent.com` 解析失败（DNS）**：用户网络不通 GitHub。修复：README 把 **Gitee 镜像 raw 地址** 作为国内首选一行命令；同时 `bootstrap.ps1` 下载仓库 zip 增加 **GitHub → Gitee 自动回退**（`irm \| iex` 无法传 `-Source` 参数，故必须在脚本内自动降级）。
 2. **`iex` 解析失败（BOM 导致）**：原 `bootstrap.ps1` 带 BOM，经 `irm \| iex` 后注释块失效。修复：移除 BOM（见 6.1）。
+3. **`Expand-Archive` 解压阶段崩溃「找不到中央目录结尾记录」**：用户在国内网络下，GitHub 不通 → 回退 Gitee 时，镜像返回 **HTTP 200 的 HTML 登录/拦截页（约 40KB）**，被当成 zip 下载，解压即崩。修复：`Get-RepoArchive` 下载后做**两道前置校验**——(a) 响应 `Content-Type` 为 `text/html` 直接抛「返回内容类型为 HTML」并提示登录页/错误页；(b) `Test-ZipFile` 校验 **ZIP 魔数（PK）+ 可打开完整性**，魔数不符抛「不是有效的 ZIP 压缩包」；两者均在 `Expand-Archive` 之前拦截，使「所有来源失败」能优雅回退并给出排查建议（离线 Local / git clone Gitee + setup.ps1 / 手动 zip）。同时下载源链补充 **GitHubProxy（ghproxy.com 镜像）**，顺序为 `GitHub → GitHubProxy → Gitee`。`Test-ZipFile` 仅以魔数为硬门槛、完整性打开为尽力而为（不误杀合法 zip），并**移除了原先 `-lt 1024` 的长度门槛**（会误杀合法的小体积 zip，属 false negative）。已用自测脚本在 **PowerShell 5.1 与 7.x** 下覆盖：DryRun 列出三源、真 zip 解压成功、本地假 HTML 被拒、镜像返回 HTML 在下载阶段拦截、镜像返回非 ZIP 被拒——全部 PASS。
 
-> Gitee 镜像源假设仓库 `pingwang1994/OpenCpolarSync` 已存在；若该镜像未建立，则 Gitee 回退同样失败，需改用 `-Source Local` 离线归档。
+> Gitee 镜像源假设仓库 `pingwang1994/OpenCpolarSync` 已存在；若该镜像未建立，则 Gitee 回退同样失败，需改用 `-Source Local` 离线归档。bootstrap.ps1 仍为**无 BOM UTF-8（LF）**，供 `irm \| iex` 使用。
 
 ---
 

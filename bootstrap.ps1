@@ -13,7 +13,7 @@
     典型用法（在 PowerShell 中粘贴执行）：
     # 国内网络（GitHub 不通）优先用 Gitee 镜像获取本脚本：
     irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
-    # 或 GitHub 源（默认会自动回退 Gitee 下载）：
+    # 或 GitHub 源（默认会自动回退 Gitee / 代理镜像下载）：
     irm https://raw.githubusercontent.com/PingWangWang/OpenCpolarSync/main/bootstrap.ps1 | iex
 
     编码说明：本脚本刻意保存为【无 BOM】的 UTF-8。原因是 irm 返回的内容若带 BOM，
@@ -47,7 +47,7 @@
     .\bootstrap.ps1 -Source Gitee
     从 Gitee 镜像下载（GitHub 访问不畅时使用）。
 .NOTES
-    Version: 1.0
+    Version: 1.1
     Compatible: Windows 7 SP1+ / PowerShell 5.0+
                 实测通过：Windows PowerShell 5.1.26100（Windows 预装版）、PowerShell 7.6.4
 #>
@@ -111,7 +111,7 @@ function Write-Log {
 
 # ============================================================
 # Function: Resolve-ArchiveUrl — 按来源解析仓库归档地址
-# 提供 GitHub / Gitee 双源，便于在国内网络环境下切换。
+# 提供 GitHub / Gitee / GitHubProxy（ghproxy 代理镜像）三源，便于在国内网络环境下切换。
 # ============================================================
 function Resolve-ArchiveUrl {
     param(
@@ -123,16 +123,56 @@ function Resolve-ArchiveUrl {
     if ($Custom) { return $Custom }
 
     switch ($From) {
-        'GitHub' { return "https://github.com/PingWangWang/OpenCpolarSync/archive/refs/heads/$RefBranch.zip" }
-        'Gitee'  { return "https://gitee.com/pingwang1994/OpenCpolarSync/repository/archive/$RefBranch.zip" }
-        default  { return $null }
+        'GitHub'     { return "https://github.com/PingWangWang/OpenCpolarSync/archive/refs/heads/$RefBranch.zip" }
+        'GitHubProxy'{ return "https://ghproxy.com/https://github.com/PingWangWang/OpenCpolarSync/archive/refs/heads/$RefBranch.zip" }
+        'Gitee'      { return "https://gitee.com/pingwang1994/OpenCpolarSync/repository/archive/$RefBranch.zip" }
+        default      { return $null }
     }
+}
+
+# ============================================================
+# Function: Test-ZipFile — 校验下载内容是否为可解压的有效 ZIP
+# 仅靠 Invoke-WebRequest 的“下载成功”不足以判断拿到的是压缩包：当镜像源返回
+# 登录页/错误页/拦截页（HTTP 200 的 HTML）时，下载也会“成功”，但 Expand-Archive
+# 会报“找不到中央目录结尾记录”。这里通过魔数 + 完整性打开做前置拦截。
+# ============================================================
+function Test-ZipFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path $Path)) { return $false }
+
+    # 魔数校验：合法的 ZIP 以 PK（0x50 0x4B）开头
+    $buf = New-Object byte[] 4
+    $fs = [System.IO.File]::OpenRead($Path)
+    try {
+        if ($fs.Read($buf, 0, 4) -ne 4) { return $false }
+    } finally {
+        $fs.Close()
+    }
+    if (-not ($buf[0] -eq 0x50 -and $buf[1] -eq 0x4B)) { return $false }
+
+    # 魔数通过即视为有效 ZIP。下方完整性打开为“尽力而为”：仅用于提前暴露截断/损坏，
+    # 若运行环境缺少相应程序集或打开失败，一律信任魔数结果（返回 $true），
+    # 避免把合法 zip 误判为无效；真正的损坏会由后续 Expand-Archive 清晰报错。
+    try {
+        Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
+        $fs2 = [System.IO.File]::OpenRead($Path)
+        try {
+            $za = New-Object System.IO.Compression.ZipArchive($fs2, [System.IO.Compression.ZipArchiveMode]::Read)
+            $za.Dispose()
+        } finally {
+            $fs2.Close()
+        }
+    } catch { }
+
+    return $true
 }
 
 # ============================================================
 # Function: Get-RepoArchive — 下载仓库压缩包
 # 部分 Windows 环境对 GitHub 的证书吊销检查会失败（CRYPT_E_NO_REVOCATION_CHECK），
-# 这里放宽服务端证书校验以避免下载被无谓中断。
+# 这里放宽服务端证书校验以避免下载被无谓中断。下载完成后会校验内容是否为有效
+# ZIP，拒绝登录页/错误页/被拦截的响应，使“所有来源失败”能优雅回退而非在解压时崩溃。
 # ============================================================
 function Get-RepoArchive {
     param(
@@ -145,8 +185,26 @@ function Get-RepoArchive {
 
     Write-Log 'STEP' "正在下载：$Url"
     $progressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing
-    Write-Log 'OK' "下载完成（$([math]::Round((Get-Item $Destination).Length / 1MB, 2)) MB）"
+
+    # -PassThru 以读取响应头（Content-Type），识别 HTML 错误/登录页
+    $resp = Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing -PassThru
+
+    # 校验 1：响应类型不应是 HTML（HTML 通常是登录页/拦截页，而非压缩包）
+    $ct = ''
+    try { $ct = $resp.Headers['Content-Type'] } catch { }
+    if ($ct -and $ct -match 'text/html') {
+        Remove-Item $Destination -Force -ErrorAction SilentlyContinue
+        throw "返回内容类型为 HTML（$ct）：来源可能返回了登录页或错误页，而非 ZIP 压缩包"
+    }
+
+    # 校验 2：ZIP 魔数（PK）+ 可打开完整性，拒绝被网络拦截/截断的响应（HTML/非压缩包）
+    if (-not (Test-ZipFile -Path $Destination)) {
+        Remove-Item $Destination -Force -ErrorAction SilentlyContinue
+        throw '下载内容不是有效的 ZIP 压缩包（魔数或完整性校验失败），来源可能返回了登录页/错误页'
+    }
+
+    $len = (Get-Item $Destination).Length
+    Write-Log 'OK' "下载完成（$([math]::Round($len / 1MB, 2)) MB）"
 }
 
 # ============================================================
@@ -182,11 +240,11 @@ if ($DryRun) {
     if ($Source -eq 'Local') {
         Write-Log 'INFO' "计划使用本地归档：$LocalArchivePath"
     } else {
-        $drySources = if ($Source -eq 'GitHub') { @('GitHub', 'Gitee') } else { @($Source) }
+        $drySources = if ($Source -eq 'GitHub') { @('GitHub', 'GitHubProxy', 'Gitee') } else { @($Source) }
         foreach ($s in $drySources) {
             Write-Log 'INFO' "计划下载（$s）：$(Resolve-ArchiveUrl -From $s -RefBranch $Branch -Custom $RepoUrl)"
         }
-        Write-Log 'INFO' '（GitHub 不通时自动回退 Gitee）'
+        Write-Log 'INFO' '（GitHub 不通时自动回退 代理镜像 / Gitee）'
     }
     Write-Log 'INFO' "计划解压到：$appDir"
 } elseif ($Source -eq 'Local') {
@@ -195,12 +253,17 @@ if ($DryRun) {
         Write-Log 'ERROR' "-Source Local 需要提供有效的 -LocalArchivePath"
         exit 1
     }
+    if (-not (Test-ZipFile -Path $LocalArchivePath)) {
+        Write-Log 'ERROR' "本地归档不是有效的 ZIP 压缩包：$LocalArchivePath"
+        Write-Host '请用仓库归档（如 main.zip）而不是网页/日志等文件。' -ForegroundColor Yellow
+        exit 1
+    }
     Write-Log 'OK' "使用本地归档：$LocalArchivePath"
     $tempZip = $LocalArchivePath
 } else {
-    # 下载来源列表：默认 GitHub，失败时自动回退 Gitee，让「irm | iex」一行命令
+    # 下载来源列表：默认 GitHub，失败时依次回退 代理镜像 / Gitee，让「irm | iex」一行命令
     # 在国内网络（GitHub 不通）也能跑通，无需用户手动追加 -Source Gitee。
-    $trySources = if ($Source -eq 'GitHub') { @('GitHub', 'Gitee') } else { @($Source) }
+    $trySources = if ($Source -eq 'GitHub') { @('GitHub', 'GitHubProxy', 'Gitee') } else { @($Source) }
 
     $downloaded = $false
     foreach ($trySrc in $trySources) {
@@ -217,10 +280,16 @@ if ($DryRun) {
     }
 
     if (-not $downloaded) {
-        Write-Log 'ERROR' '所有来源下载失败'
+        Write-Log 'ERROR' '所有来源均下载失败或返回了无效的压缩包'
         Write-Host ''
-        Write-Host '可改用本地归档包离线部署：' -ForegroundColor Yellow
-        Write-Host '  .\bootstrap.ps1 -Source Local -LocalArchivePath "D:\path\to\main.zip"' -ForegroundColor Yellow
+        Write-Host '排查建议：' -ForegroundColor Yellow
+        Write-Host '  1) 若提示“不是有效的 ZIP / 返回 HTML”，说明镜像源返回了登录页或错误页，' -ForegroundColor Yellow
+        Write-Host '     通常是该仓库为私有或被网络拦截。请改用本地归档离线部署：' -ForegroundColor Yellow
+        Write-Host '     .\bootstrap.ps1 -Source Local -LocalArchivePath "D:\path\to\main.zip"' -ForegroundColor Yellow
+        Write-Host '  2) 或先 clone 再运行（国内可用 Gitee 源）：' -ForegroundColor Yellow
+        Write-Host '     git clone https://gitee.com/pingwang1994/OpenCpolarSync.git ; .\setup.ps1' -ForegroundColor Yellow
+        Write-Host '  3) 也可手动下载 zip 后离线部署：' -ForegroundColor Yellow
+        Write-Host '     https://gitee.com/pingwang1994/OpenCpolarSync/repository/archive/main.zip' -ForegroundColor Yellow
         exit 1
     }
 }
