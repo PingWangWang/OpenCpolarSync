@@ -12,7 +12,17 @@
     Version: 1.0
     Compatible: Windows 7 SP1+ / PowerShell 5.0+
     API: Cpolar Web backend at localhost:9200 (JWT token auth)
+.PARAMETER ConfigPath
+    外部配置文件（config.json）的完整路径（可选）。指定后，配置文件与已发送缓存
+    将存放到该文件所在目录，便于把配置放到 %LOCALAPPDATA% 等用户可写目录，升级脚本
+    时不会被覆盖；不指定时使用脚本同级的 config 目录（保持原有行为）。
 #>
+
+param(
+    # 外部配置文件完整路径（可选）。指定后配置与缓存脱离仓库目录，
+    # 升级或重装脚本时不会被覆盖。
+    [string]$ConfigPath
+)
 
 # ============================================================
 # Initialization: hide the console window at runtime
@@ -46,8 +56,16 @@ if (-not $scriptDir) {
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
 
-$configPath       = Join-Path -Path $scriptDir -ChildPath "config/config.json"
-$sentCachePath    = Join-Path -Path $scriptDir -ChildPath "config/last-sent.json"
+# 配置目录：通过 -ConfigPath 指定外部配置文件时，配置与已发送缓存一并存放到该
+# 文件所在目录；未指定时回退到脚本同级 config 目录（保持原有行为不变）。
+if ($ConfigPath) {
+    $configDir     = Split-Path -Parent $ConfigPath
+    $configPath    = $ConfigPath
+} else {
+    $configDir     = Join-Path -Path $scriptDir -ChildPath "config"
+    $configPath    = Join-Path -Path $configDir -ChildPath "config.json"
+}
+$sentCachePath    = Join-Path -Path $configDir -ChildPath "last-sent.json"
 $logFile          = Join-Path -Path $scriptDir -ChildPath "logs/guard.log"
 $pollIntervalSec  = 300              # Default 5 minutes, overridden by config
 $apiTunnelsPath   = "/api/v1/tunnels"
