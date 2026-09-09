@@ -26,25 +26,25 @@ OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三�
 
 在 **Windows PowerShell** 中粘贴执行（无需安装 git，无需手动 clone）。
 
-**国内网络（GitHub 不通）优先用 Gitee 镜像获取启动器：**
+**推荐（GitHub Release 资产，下载稳定）：**
+
+```powershell
+irm https://github.com/PingWangWang/OpenCpolarSync/releases/download/v1.1.14/bootstrap.ps1 | iex
+```
+
+**国内备选（Gitee 镜像）：**
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
 ```
 
-GitHub 源（默认会自动回退 Gitee 下载，因此即使从 GitHub 获取本脚本也能跑通）：
-
-```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-irm https://raw.githubusercontent.com/PingWangWang/OpenCpolarSync/main/bootstrap.ps1 | iex
-```
-
 > **提示 1：为什么要先执行那一行 `Tls12`？**  
 > Windows PowerShell 5.1（系统预装版）默认只启用 `Ssl3|Tls`，而 Gitee raw 会 302 跳转到 `raw.giteeusercontent.com` CDN，该 CDN 要求 TLS 1.2+。若不先开 TLS 1.2，`irm` 会在建立连接阶段报 `基础连接已经关闭: 发送时发生错误`。这一行只需执行一次（在当前 PowerShell 窗口生效），之后再跑 `irm ... | iex` 就无需重复。
 >
-> **提示 2：`bootstrap.ps1` 现在也支持 `.\` 直接运行。**  
-> 它是 **UTF-8 with BOM** 格式，且 `param()` 位于文件最前（对齐 Win11Debloat 的 `Get_CN.ps1`）。因此两种跑法都行：`irm ... | iex`（`irm` 拉取时 .NET 会自动剥离 BOM）和下载后 `.\bootstrap.ps1`（5.1 靠 BOM 识别 UTF-8，中文不乱码）。若你下载到本地直接跑，需要先放开执行策略：`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`（一次即可）。
+> **提示 2：为什么入口分 `bootstrap.ps1` 和 `bootstrap-core.ps1`？**  
+> `bootstrap.ps1` 是**纯 ASCII 引导器**（不含中文，任何 PowerShell 版本 `irm | iex` 都不会乱码）；它负责以 UTF-8 正确解码并执行 `bootstrap-core.ps1`（真正的中文逻辑）。这样在 **PowerShell 5.1 与 7.x** 下中文都正常（5.1 的 `irm` 对 HTTP 文本按 ANSI 解码，直接拉中文脚本会乱码）。  
+> 引导器启动时会请求管理员权限，并让「下载 + 解压 + 部署向导」**在同一个提权窗口**内完成，不再另开第二个窗口。若你下载到本地直接跑，需要先放开执行策略：`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`（一次即可）。
 
 ### 方式 B：下载到本地后直接运行
 
@@ -53,6 +53,8 @@ irm https://raw.githubusercontent.com/PingWangWang/OpenCpolarSync/main/bootstrap
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\bootstrap.ps1
 ```
+
+> 本地运行时会加载同目录下的 `bootstrap-core.ps1`（发布包 zip 已包含这两个文件）；若缺少 core，引导器会自动从 Release 下载。
 
 ### 方式 C：已 clone 仓库
 
@@ -77,23 +79,26 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
     -WebhookUrl 'https://oapi.dingtalk.com/robot/send?access_token=xxx' `
     -CpolarUser 'you@example.com' `
     -CpolarPassword 'your-password' `
+    -OpenlistPassword 'openlist-web-password' `
     -TunnelNames 'OpenListHC'
 ```
 
 ### 一键部署到底做了什么
 
+> 引导器会先请求管理员权限，并让以下所有步骤在**同一个提权窗口**完成；程序文件优先从 **GitHub Release 资产**下载（**带下载进度条**），若检测到已安装则**跳过下载**（需要重新下载更新时加 `-Force`）。
+
 | 阶段 | 自动完成的动作 | 替代的原手工步骤 |
 |------|----------------|------------------|
 | 1 | 检测 Cpolar 客户端，未安装则静默安装仓库自带的 `cpolar_amd64.msi` | 手动安装 msi |
 | 2 | 从 `archive/openlist.zip` 自动解压 `openlist.exe` 到 `Openlist/` | 手动解压（隐含步骤） |
-| 3 | 交互式收集配置，隧道名等带默认值，直接回车即可 | 手动编辑 config.json |
-| 4 | 生成 `config.json` 并持久化到用户目录（升级不丢失） | 手动编辑 config.json |
+| 3 | 交互式收集配置（含 **Openlist Web 登录密码**），隧道名等带默认值，直接回车即可 | 手动编辑 config.json |
+| 4 | 生成 `config.json` 并持久化到用户目录（升级不丢失）；按所设密码自动执行 `openlist admin set` | 手动改密码 / 查初始随机密码 |
 | 5 | 写入 `cpolar.yml` 并注册 authtoken，自动创建内网穿透隧道 | Web 端手动建隧道 |
 | 6 | 注册 Watchdog S4U 计划任务，并立即拉起两个 Guard | 手动执行 WatchdogManager |
 
 ### 仍需人工的一步
 
-**Openlist 存储挂载**需要你在 Web 界面完成。脚本会自动打开 `http://localhost:5244` 并打印步骤清单。
+**Openlist 存储挂载**需要你在 Web 界面完成。脚本会自动打开 `http://localhost:5244` 并打印步骤清单；登录账号固定为 `admin`，密码即部署时设置的 **Openlist Web 登录密码**（不再需要去日志里找初始随机密码）。
 
 原因是 openlist 的挂载配置保存在它自己的数据库里，跨版本格式不稳定，脚本强写反而容易损坏配置，因此这里只做引导 + 端口/进程校验。
 
@@ -149,8 +154,10 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ```
 OpenCpolarSync/
-├── setup.ps1                   # 一键部署向导（6 阶段，支持 -DryRun / -Silent）
-├── bootstrap.ps1               # 免 clone 启动器（GitHub / Gitee / 本地三源）
+├── setup.ps1                   # 一键部署向导（含 Openlist 登录密码设置，支持 -DryRun / -Silent）
+├── bootstrap.ps1               # 纯 ASCII 引导器（irm|iex 兼容 5.1/7，自动提权，单窗口完成）
+├── bootstrap-core.ps1          # 引导器加载的中文主逻辑（Release 资产优先 + 进度条 + 缓存跳过）
+├── build_release_zip.ps1       # 打包 Release 资产 zip（引导器 + core + setup + 资源）
 ├── docs/                       # 设计文档
 │   └── OneClick-Deploy-Design.md
 ├── Watchdog/                   # 运行时保活看门狗
@@ -207,7 +214,10 @@ OpenCpolarSync/
 
 3. **升级程序不会丢失配置**：重新运行 `bootstrap.ps1` 时，配置主副本位于 `%LOCALAPPDATA%\OpenCpolarSync\config`，不在程序解压目录内。
 
-4. **脚本必须保持 UTF-8 with BOM**：Windows PowerShell 5.1 会按系统 ANSI 代码页（简体中文为 GBK）解析**无 BOM** 的 UTF-8 脚本，中文会损坏并直接导致语法错误。修改脚本时请勿丢掉 BOM。
+4. **脚本编码约定**：
+   - 本地 `setup.ps1`、`bootstrap-core.ps1` 保持 **UTF-8 with BOM**（`.\` 直接运行时不乱码）。
+   - `bootstrap.ps1` 是**纯 ASCII 引导器**（不含中文，保证 `irm | iex` 在 5.1/7 都不乱码）。
+   - 上传到 Release 的 `bootstrap-core.ps1` 用**无 BOM UTF-8**（由引导器按 UTF-8 正确解码后执行）。
 
 ## 🤝 贡献
 

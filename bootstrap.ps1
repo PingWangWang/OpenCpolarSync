@@ -1,400 +1,43 @@
-﻿param(
-    [ValidateSet('GitHub', 'Gitee', 'Local')]
-    [string]$Source = 'GitHub',
-
-    [string]$RepoUrl,
-    [string]$Branch = 'main',
-    [string]$InstallDir,
-    [string]$LocalArchivePath,
-
-    [switch]$NoSetup,
-    [switch]$DryRun,
-
-    [string]$WebhookUrl,
-    [string]$CpolarUser,
-    [string]$CpolarPassword,
-    [string[]]$TunnelNames,
-    [string]$AuthToken,
-    [int]$Interval,
-    [switch]$Silent
-)
-
-<#
-.SYNOPSIS
-    OpenCpolarSync 一键启动器（免 clone 部署入口）。
-.DESCRIPTION
-    一条命令即可完成部署，用户无需安装 git 或手动 clone 仓库：
-      1. 从 GitHub / Gitee / 本地归档下载仓库压缩包
-      2. 解压到 %LOCALAPPDATA%\OpenCpolarSync\app
-      3. 以管理员权限调用 setup.ps1 完成后续全部部署步骤
-
-    配置文件固定存放在 %LOCALAPPDATA%\OpenCpolarSync\config，位于 app 目录之外，
-    因此重复运行本脚本升级程序时不会覆盖已有配置（对齐 Win11Debloat 的做法）。
-
-    典型用法（在 PowerShell 中粘贴执行）：
-    # 国内网络（GitHub 不通）优先用 Gitee 镜像获取本脚本：
-    irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
-    # 或 GitHub 源（默认会自动回退 Gitee / 代理镜像下载）：
-    irm https://raw.githubusercontent.com/PingWangWang/OpenCpolarSync/main/bootstrap.ps1 | iex
-    # 或下载到本地后直接运行（本脚本为 UTF-8 with BOM，.\\ 直接跑不乱码）：
-    .\bootstrap.ps1
-
-    编码说明：本脚本保存为【UTF-8 with BOM】。原因：本地以 .\\ 直接运行时，Windows
-    PowerShell 5.1 需靠 BOM 识别 UTF-8，否则中文会被按系统 ANSI（GBK）解码而乱码；
-    而 irm 拉取时 .NET 会在解码阶段自动剥离 BOM（字符串首个字符即为 param，不含 BOM），
-    因此 BOM 不影响 irm | iex。为保证两者兼容，本脚本把 param() 放在文件最前、
-    注释块移到其后（BOM 顶在 param 前无害）。对齐 Win11Debloat 的 Get_CN.ps1 做法。
-.PARAMETER Source
-    下载来源：GitHub（默认）、Gitee 或 Local（使用本地 zip）。
-.PARAMETER RepoUrl
-    自定义仓库归档地址，指定后忽略 -Source。
-.PARAMETER Branch
-    分支名，默认 main。
-.PARAMETER InstallDir
-    安装根目录，默认 %LOCALAPPDATA%\OpenCpolarSync；程序解压到其下的 app 子目录。
-.PARAMETER LocalArchivePath
-    -Source Local 时使用的本地 zip 路径。
-.PARAMETER NoSetup
-    只下载解压，不自动调用 setup.ps1。
-.PARAMETER DryRun
-    演练模式，只打印计划，不下载不解压不执行。
-.PARAMETER WebhookUrl / CpolarUser / CpolarPassword / TunnelNames / AuthToken / Interval
-    透传给 setup.ps1 的配置项，用于无人值守部署。
-.PARAMETER Silent
-    透传给 setup.ps1，使其以非交互方式运行。
-.EXAMPLE
-    .\bootstrap.ps1
-    交互方式下载并部署。
-.EXAMPLE
-    .\bootstrap.ps1 -Source Gitee
-    从 Gitee 镜像下载（GitHub 访问不畅时使用）。
-.NOTES
-    Version: 1.4
-    Compatible: Windows 7 SP1+ / PowerShell 5.0+
-                实测通过：Windows PowerShell 5.1.26100（Windows 预装版）、PowerShell 7.6.4
-#>
-
+# OpenCpolarSync bootstrap launcher.
+# ASCII-only on purpose: Windows PowerShell 5.1 decodes HTTP text responses as
+# Latin1/ANSI, so a UTF-8 script fetched via "irm <url> | iex" gets garbled.
+# This launcher stays pure ASCII and re-launches everything in ONE elevated
+# window, so the whole deployment (download + extract + setup wizard) runs in a
+# single window instead of opening a second one later.
 $ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# 设置 UTF-8 输出编码以正确显示中文；非控制台环境下该属性可能不可用，做保护处理
-try {
-    # Windows PowerShell 5.1 的控制台默认使用系统 ANSI 代码页（简体中文为 936/GBK），
-    # 此时强行改为 UTF-8 会让中文提示在控制台显示为乱码；因此仅在 PowerShell 6+
-    # 或控制台本身已是 UTF-8(65001) 时才同步输出编码。
-    if ($PSVersionTable.PSVersion.Major -ge 6 -or [Console]::OutputEncoding.CodePage -eq 65001) {
-        [Console]::OutputEncoding = [Text.Encoding]::UTF8
-    }
-} catch { }
+$coreName = 'bootstrap-core.ps1'
+$coreUrl  = 'https://github.com/PingWangWang/OpenCpolarSync/releases/download/v1.1.14/' + $coreName
 
-# ============================================================
-# Function: Write-Log — 输出带级别着色的中文日志
-# ============================================================
-function Write-Log {
-    param(
-        [Parameter(Mandatory = $true)]
-        [ValidateSet('INFO', 'STEP', 'OK', 'WARN', 'ERROR')]
-        [string]$Level,
+# Materialize the real script to a temp file so it can run in a new elevated process.
+$coreFile = Join-Path $env:TEMP 'OpenCpolarSync-bootstrap-core.ps1'
+$localCore = $null
+if ($PSScriptRoot) { $localCore = Join-Path $PSScriptRoot $coreName }
 
-        [Parameter(Mandatory = $true)]
-        [string]$Message
-    )
-
-    $color = switch ($Level) {
-        'OK'    { 'Green' }
-        'WARN'  { 'Yellow' }
-        'ERROR' { 'Red' }
-        'STEP'  { 'Cyan' }
-        default { 'Gray' }
-    }
-
-    Write-Host "[$Level] $Message" -ForegroundColor $color
-}
-
-# ============================================================
-# Function: Resolve-ArchiveUrl — 按来源解析仓库归档地址
-# 提供 GitHub / Gitee / GitHubProxy（ghproxy 代理镜像）三源，便于在国内网络环境下切换。
-# 默认回退顺序：GitHub → Gitee（国内自有镜像）→ GitHubProxy，避免第三方代理在部分网络下
-# 长时间无响应。当前 GitHubProxy 使用 gh.ddlc.top；若该镜像不可用，可改用 -RepoUrl 自定义。
-# ============================================================
-function Resolve-ArchiveUrl {
-    param(
-        [Parameter(Mandatory = $true)][string]$From,
-        [Parameter(Mandatory = $true)][string]$RefBranch,
-        [string]$Custom
-    )
-
-    if ($Custom) { return $Custom }
-
-    switch ($From) {
-        'GitHub'     { return "https://github.com/PingWangWang/OpenCpolarSync/archive/refs/heads/$RefBranch.zip" }
-        'GitHubProxy'{ return "https://gh.ddlc.top/https://github.com/PingWangWang/OpenCpolarSync/archive/refs/heads/$RefBranch.zip" }
-        'Gitee'      { return "https://gitee.com/pingwang1994/OpenCpolarSync/repository/archive/$RefBranch.zip" }
-        default      { return $null }
-    }
-}
-
-# ============================================================
-# Function: Test-ZipFile — 校验下载内容是否为可解压的有效 ZIP
-# 仅靠 Invoke-WebRequest 的"下载成功"不足以判断拿到的是压缩包：当镜像源返回
-# 登录页/错误页/拦截页（HTTP 200 的 HTML）时，下载也会"成功"，但 Expand-Archive
-# 会报"找不到中央目录结尾记录"。这里通过魔数 + 完整性打开做前置拦截。
-# ============================================================
-function Test-ZipFile {
-    param([Parameter(Mandatory = $true)][string]$Path)
-
-    if (-not (Test-Path $Path)) { return $false }
-
-    # 魔数校验：合法的 ZIP 以 PK（0x50 0x4B）开头
-    $buf = New-Object byte[] 4
-    $fs = [System.IO.File]::OpenRead($Path)
-    try {
-        if ($fs.Read($buf, 0, 4) -ne 4) { return $false }
-    } finally {
-        $fs.Close()
-    }
-    if (-not ($buf[0] -eq 0x50 -and $buf[1] -eq 0x4B)) { return $false }
-
-    # 魔数通过即视为有效 ZIP。下方完整性打开为"尽力而为"：仅用于提前暴露截断/损坏，
-    # 若运行环境缺少相应程序集或打开失败，一律信任魔数结果（返回 $true），
-    # 避免把合法 zip 误判为无效；真正的损坏会由后续 Expand-Archive 清晰报错。
-    try {
-        Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
-        $fs2 = [System.IO.File]::OpenRead($Path)
-        try {
-            $za = New-Object System.IO.Compression.ZipArchive($fs2, [System.IO.Compression.ZipArchiveMode]::Read)
-            $za.Dispose()
-        } finally {
-            $fs2.Close()
-        }
-    } catch { }
-
-    return $true
-}
-
-# ============================================================
-# Function: Get-RepoArchive — 下载仓库压缩包
-# 显式启用 TLS 1.2（PS 5.1 默认仅 Ssl3|Tls），但不再放宽服务端证书校验——那会破坏
-# TLS 握手（三源统一报「基础连接已经关闭」），且全局关闭证书校验有安全风险。
-# 下载完成后会校验内容是否为有效 ZIP，拒绝登录页/错误页/被拦截的响应，
-# 使"所有来源失败"能优雅回退而非在解压时崩溃。
-# ============================================================
-function Get-RepoArchive {
-    param(
-        [Parameter(Mandatory = $true)][string]$Url,
-        [Parameter(Mandatory = $true)][string]$Destination
-    )
-
-    # 显式启用 TLS 1.2（PS 5.1 默认仅 Ssl3|Tls，连不上要求 TLS1.2+ 的 CDN）。
-    # 注意：不要设置 ServerCertificateValidationCallback —— 该回调是 AppDomain 级全局副作用，
-    # 会破坏 TLS 握手（三源统一报「基础连接已经关闭: 发送时发生错误」），且全局关闭证书校验本身有安全风险。
-    # 证书校验交给 PowerShell/.NET 默认行为（与 Win11Debloat 的 Get_CN.ps1 一致，可正常下载）。
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
-
-    Write-Log 'STEP' "正在下载：$Url"
-    $progressPreference = 'SilentlyContinue'
-
-    # 函数级保护：下载/校验任何环节失败都清理临时文件并把异常抛给外层回退逻辑。
-    # 超时 45 秒，避免 ghproxy 等镜像在部分网络下长时间无响应导致用户以为卡死。
-    try {
-        # -PassThru 以读取响应头（Content-Type），识别 HTML 错误/登录页
-        $resp = Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing -PassThru `
-                                  -TimeoutSec 45 -MaximumRedirection 5
-
-        # 校验 1：响应类型不应是 HTML（HTML 通常是登录页/拦截页，而非压缩包）
-        $ct = ''
-        try { $ct = $resp.Headers['Content-Type'] } catch { }
-        if ($ct -and $ct -match 'text/html') {
-            Remove-Item $Destination -Force -ErrorAction SilentlyContinue
-            throw "返回内容类型为 HTML（$ct）：来源可能返回了登录页或错误页，而非 ZIP 压缩包"
-        }
-
-        # 校验 2：ZIP 魔数（PK）+ 可打开完整性，拒绝被网络拦截/截断的响应（HTML/非压缩包）
-        if (-not (Test-ZipFile -Path $Destination)) {
-            Remove-Item $Destination -Force -ErrorAction SilentlyContinue
-            throw '下载内容不是有效的 ZIP 压缩包（魔数或完整性校验失败），来源可能返回了登录页或错误页'
-        }
-
-        $len = (Get-Item $Destination).Length
-        Write-Log 'OK' "下载完成（$([math]::Round($len / 1MB, 2)) MB）"
-    } catch {
-        # 确保即使 Invoke-WebRequest 内部抛出的非终止错误/线程异常也能被捕获，
-        # 并清理可能残留的半成品 zip，避免被后续来源误判为有效缓存。
-        try { Remove-Item $Destination -Force -ErrorAction SilentlyContinue } catch { }
-        throw $_
-    }
-}
-
-# ============================================================
-# 主流程
-# ============================================================
-
-# 清屏在非控制台环境下可能失败，做保护处理
-try { Clear-Host } catch { }
-Write-Host '==========================================' -ForegroundColor Cyan
-Write-Host ' OpenCpolarSync 一键部署' -ForegroundColor Cyan
-Write-Host '==========================================' -ForegroundColor Cyan
-
-# --- 路径解析 -------------------------------------------------------------
-if (-not $InstallDir) {
-    $InstallDir = Join-Path $env:LOCALAPPDATA 'OpenCpolarSync'
-}
-$appDir   = Join-Path $InstallDir 'app'
-$configDir = Join-Path $InstallDir 'config'
-$tempZip  = Join-Path $env:TEMP "OpenCpolarSync-$Branch.zip"
-
-Write-Log 'INFO' "安装目录：$appDir"
-Write-Log 'INFO' "配置目录：$configDir（不受升级影响）"
-
-if ($DryRun) {
-    Write-Host ' 演练模式：不会下载、解压或执行任何操作' -ForegroundColor Magenta
-}
-
-# --- 阶段 1：获取仓库文件 ---------------------------------------------------
-Write-Host ''
-Write-Host '--- 阶段 1：获取程序文件 ---' -ForegroundColor Cyan
-
-if ($DryRun) {
-    if ($Source -eq 'Local') {
-        Write-Log 'INFO' "计划使用本地归档：$LocalArchivePath"
-    } else {
-        $drySources = if ($Source -eq 'GitHub') { @('GitHub', 'Gitee', 'GitHubProxy') } else { @($Source) }
-        foreach ($s in $drySources) {
-            Write-Log 'INFO' "计划下载（$s）：$(Resolve-ArchiveUrl -From $s -RefBranch $Branch -Custom $RepoUrl)"
-        }
-        Write-Log 'INFO' '（GitHub 不通时自动回退 Gitee / 代理镜像）'
-    }
-    Write-Log 'INFO' "计划解压到：$appDir"
-} elseif ($Source -eq 'Local') {
-    # 本地兜底：直接使用已有的 zip，适用于完全离线的环境
-    if (-not $LocalArchivePath -or -not (Test-Path $LocalArchivePath)) {
-        Write-Log 'ERROR' "-Source Local 需要提供有效的 -LocalArchivePath"
-        exit 1
-    }
-    if (-not (Test-ZipFile -Path $LocalArchivePath)) {
-        Write-Log 'ERROR' "本地归档不是有效的 ZIP 压缩包：$LocalArchivePath"
-        Write-Host '请用仓库归档（如 main.zip）而不是网页/日志等文件。' -ForegroundColor Yellow
-        exit 1
-    }
-    Write-Log 'OK' "使用本地归档：$LocalArchivePath"
-    $tempZip = $LocalArchivePath
+if ($localCore -and (Test-Path $localCore)) {
+    Copy-Item $localCore $coreFile -Force
 } else {
-    # 下载来源列表：默认 GitHub，失败时依次回退 Gitee（国内自有镜像）/ 代理镜像，
-    # 让「irm | iex」一行命令在国内网络（GitHub 不通）也能跑通，无需用户手动追加 -Source Gitee。
-    $trySources = if ($Source -eq 'GitHub') { @('GitHub', 'Gitee', 'GitHubProxy') } else { @($Source) }
-
-    $downloaded = $false
-    foreach ($trySrc in $trySources) {
-        $url = Resolve-ArchiveUrl -From $trySrc -RefBranch $Branch -Custom $RepoUrl
-        try {
-            Write-Log 'INFO' "尝试来源：$trySrc"
-            Get-RepoArchive -Url $url -Destination $tempZip
-            $downloaded = $true
-            break
-        } catch {
-            Write-Log 'WARN' "$trySrc 下载失败：$($_.Exception.Message)"
-            if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
-        }
-    }
-
-    if (-not $downloaded) {
-        Write-Log 'ERROR' '所有来源均下载失败或返回了无效的压缩包'
-        Write-Host ''
-        Write-Host '排查建议：' -ForegroundColor Yellow
-        Write-Host '  1) 若提示"不是有效的 ZIP / 返回 HTML"，说明镜像源返回了登录页或错误页，' -ForegroundColor Yellow
-        Write-Host '     通常是该仓库为私有或被网络拦截。请改用本地归档离线部署：' -ForegroundColor Yellow
-        Write-Host '     .\bootstrap.ps1 -Source Local -LocalArchivePath "D:\path\to\main.zip"' -ForegroundColor Yellow
-        Write-Host '  2) 或先 clone 再运行（国内可用 Gitee 源）：' -ForegroundColor Yellow
-        Write-Host '     git clone https://gitee.com/pingwang1994/OpenCpolarSync.git ; .\setup.ps1' -ForegroundColor Yellow
-        Write-Host '  3) 也可手动下载 zip 后离线部署：' -ForegroundColor Yellow
-        Write-Host '     https://gitee.com/pingwang1994/OpenCpolarSync/repository/archive/main.zip' -ForegroundColor Yellow
-        Write-Host '  4) 若某个来源长时间无响应后 PowerShell 直接退出，通常是该代理/镜像' -ForegroundColor Yellow
-        Write-Host '     在你当前网络下不可用。可直接强制走 Gitee（多数国内网络最稳）：' -ForegroundColor Yellow
-        Write-Host '     irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1;' -ForegroundColor Yellow
-        Write-Host '     & $env:TEMP\bootstrap.ps1 -Source Gitee' -ForegroundColor Yellow
-        exit 1
-    }
+    $wc = New-Object System.Net.WebClient
+    $wc.Headers.Add('User-Agent', 'OpenCpolarSync-bootstrap')
+    $bytes = $wc.DownloadData($coreUrl)
+    [System.IO.File]::WriteAllBytes($coreFile, $bytes)
 }
 
-# --- 阶段 2：解压 -------------------------------------------------------------
-Write-Host ''
-Write-Host '--- 阶段 2：解压程序文件 ---' -ForegroundColor Cyan
-
-if (-not $DryRun) {
-    if (-not (Test-Path $appDir)) {
-        New-Item -ItemType Directory -Path $appDir -Force | Out-Null
-    }
-
-    Write-Log 'STEP' "正在解压到 $appDir"
-    Expand-Archive -Path $tempZip -DestinationPath $appDir -Force
-
-    # 压缩包通常带一层 OpenCpolarSync-<branch> 目录，将其内容提升到 app 根目录
-    $inner = Get-ChildItem -Path $appDir -Directory |
-        Where-Object { $_.Name -like 'OpenCpolarSync-*' } |
-        Select-Object -First 1
-
-    if ($inner) {
-        Get-ChildItem -Path $inner.FullName -Force | ForEach-Object {
-            $target = Join-Path $appDir $_.Name
-            if (Test-Path $target) { Remove-Item $target -Recurse -Force }
-            Move-Item -Path $_.FullName -Destination $target -Force
-        }
-        Remove-Item $inner.FullName -Recurse -Force
-    }
-
-    Write-Log 'OK' '解压完成'
-
-    # 清理临时归档（本地模式不删除用户提供的文件）
-    if ($Source -ne 'Local' -and (Test-Path $tempZip)) {
-        Remove-Item $tempZip -Force
-        Write-Log 'OK' '已清理临时下载文件'
-    }
-}
-
-# --- 阶段 3：调用部署向导 -----------------------------------------------------
-$setupPath = Join-Path $appDir 'setup.ps1'
-
-if ($NoSetup) {
-    Write-Host ''
-    Write-Log 'INFO' "已指定 -NoSetup，程序已就绪于：$appDir"
-    exit 0
-}
-
-if (-not $DryRun -and -not (Test-Path $setupPath)) {
-    Write-Log 'ERROR' "解压后未找到 setup.ps1：$setupPath"
-    exit 1
-}
-
-Write-Host ''
-Write-Host '--- 阶段 3：执行部署向导 ---' -ForegroundColor Cyan
-
-# 组装透传给 setup.ps1 的参数，保留用户在命令行上给出的全部配置
-$setupArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$setupPath`"")
-
-if ($WebhookUrl)     { $setupArgs += '-WebhookUrl';     $setupArgs += "`"$WebhookUrl`"" }
-if ($CpolarUser)     { $setupArgs += '-CpolarUser';     $setupArgs += "`"$CpolarUser`"" }
-if ($CpolarPassword) { $setupArgs += '-CpolarPassword'; $setupArgs += "`"$CpolarPassword`"" }
-if ($TunnelNames)    { $setupArgs += '-TunnelNames';    $setupArgs += "`"$($TunnelNames -join ',')`"" }
-if ($AuthToken)      { $setupArgs += '-AuthToken';      $setupArgs += "`"$AuthToken`"" }
-if ($Interval -gt 0) { $setupArgs += '-Interval';       $setupArgs += $Interval }
-if ($Silent)         { $setupArgs += '-Silent' }
-
-# 优先使用当前宿主（5.1 用 powershell.exe，7.x 用 pwsh.exe），
-# 避免硬编码 powershell.exe 导致在 PowerShell 7 下把 setup.ps1 降级到 5.1 执行
-$psExe = 'powershell.exe'
+$isAdmin = $false
 try {
-    $currentExe = [System.Diagnostics.Process]::GetCurrentProcess().Path
-    if ($currentExe -and (Test-Path -LiteralPath $currentExe) -and ($currentExe -match 'powershell|pwsh')) {
-        $psExe = $currentExe
-    }
+    $wid = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $isAdmin = (New-Object Security.Principal.WindowsPrincipal($wid)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 } catch { }
 
-if ($DryRun) {
-    Write-Log 'INFO' "计划以管理员权限执行：$psExe $($setupArgs -join ' ')"
-    exit 0
+# -DryRun / -NoElevate are used for testing; they run in-place without elevation.
+$noElevate = ($args -contains '-NoElevate') -or ($args -contains '-DryRun')
+
+if ($isAdmin -or $noElevate) {
+    & $coreFile @args
+} else {
+    Write-Host 'OpenCpolarSync: requesting administrator privileges; the whole deployment will continue in one elevated window...' -ForegroundColor Yellow
+    $psExe = (Get-Process -Id $PID).Path
+    $argList = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $coreFile + '"')) + $args
+    Start-Process $psExe -Verb RunAs -ArgumentList $argList | Out-Null
 }
-
-Write-Log 'STEP' '正在以管理员权限启动部署向导'
-Start-Process $psExe -Verb RunAs -ArgumentList $setupArgs -Wait
-
-Write-Host ''
-Write-Log 'OK' '部署向导已结束'

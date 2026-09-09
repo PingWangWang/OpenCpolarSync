@@ -76,6 +76,7 @@ param(
     [string]$WebhookUrl,
     [string]$CpolarUser,
     [string]$CpolarPassword,
+    [string]$OpenlistPassword,
     [string[]]$TunnelNames,
     [int]$Interval = 1,
     [string]$AuthToken,
@@ -300,6 +301,51 @@ function Deploy-Openlist {
 # Function: Set-CpolarTunnel — 写入 cpolar.yml 并注册 authtoken
 # 利用 cpolar 自身的 -config / authtoken 能力，免去在 Web 端手工建隧道。
 # ============================================================
+# ============================================================
+# Function: Set-OpenlistAdminPassword — 设置 openlist(alist) 管理员密码
+# 用户名固定为 admin；直接写入 openlist 数据目录，免去用户查初始随机密码。
+# ============================================================
+function Set-OpenlistAdminPassword {
+    param(
+        [Parameter(Mandatory = $true)][string]$OpenlistDir,
+        [string]$Password
+    )
+
+    if (-not $Password) {
+        Write-Log 'INFO' '未填写 Openlist 登录密码，跳过（可稍后用 openlist.exe admin random 查看/重置）'
+        return $true
+    }
+
+    $exe = Join-Path $OpenlistDir 'openlist.exe'
+    if (-not (Test-Path $exe)) {
+        Write-Log 'WARN' "未找到 openlist.exe，跳过设置登录密码：$exe"
+        return $false
+    }
+
+    if ($DryRun) {
+        Write-Log 'DRYRUN' '计划设置 Openlist 管理员密码（用户名 admin）'
+        return $true
+    }
+
+    try {
+        $dataDir = Join-Path $OpenlistDir 'data'
+        if (-not (Test-Path $dataDir)) {
+            New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+        }
+        # 不打印命令输出，避免密码明文出现在日志中
+        & $exe admin set $Password --data $dataDir *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log 'OK' 'Openlist 登录密码已设置（用户名 admin）'
+            return $true
+        }
+        Write-Log 'WARN' "设置 Openlist 登录密码失败（exit=$LASTEXITCODE）"
+        return $false
+    } catch {
+        Write-Log 'WARN' "设置 Openlist 登录密码异常：$($_.Exception.Message)"
+        return $false
+    }
+}
+
 function Set-CpolarTunnel {
     param(
         [Parameter(Mandatory = $true)][string[]]$Tunnels,
@@ -439,6 +485,24 @@ function Invoke-ConfigWizard {
         }
     }
 
+    # --- Openlist 登录密码（用户名固定 admin，避免用户不知道初始随机密码）---
+    if (-not $Values.OpenlistPassword) {
+        $default = if ($Existing) { $Existing.openlistPassword } else { '' }
+        if ($Silent) {
+            $Values.OpenlistPassword = $default
+        } else {
+            if ($default) { Write-Log 'INFO' '检测到已保存的 Openlist 密码，直接回车可保留' }
+            $secure = Read-Host 'Openlist Web 登录密码（用户名固定 admin）' -AsSecureString
+            if ($secure.Length -gt 0) {
+                $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+                $Values.OpenlistPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+            } else {
+                $Values.OpenlistPassword = $default
+            }
+        }
+    }
+
     # --- 监控隧道名 ---
     if (-not $Values.TunnelNames -or $Values.TunnelNames.Count -eq 0) {
         $default = if ($Existing -and $Existing.selectedTunnelNames) {
@@ -502,6 +566,9 @@ function New-GuardConfigFile {
 
   "_password": "Cpolar Web 登录密码",
   "password": $(ConvertTo-JsonEscapedString $Values.CpolarPassword),
+
+  "_openlistPassword": "Openlist Web 登录密码（用户名固定 admin）",
+  "openlistPassword": $(ConvertTo-JsonEscapedString $Values.OpenlistPassword),
 
   "_keyword": "钉钉机器人安全关键词，需在钉钉群机器人安全设置中添加同名字符串",
   "keyword": "Cpolar",
@@ -583,7 +650,7 @@ function Show-FinalChecklist {
     Write-Host '==========================================' -ForegroundColor Cyan
     Write-Host ''
     Write-Host "1. 浏览器打开 http://localhost:$Port 登录 Openlist" -ForegroundColor White
-    Write-Host '   （默认账号 admin，密码在首次启动日志中，用 openlist.exe password 查看）' -ForegroundColor Gray
+    Write-Host '   （账号固定为 admin，密码为部署时设置的 Openlist 登录密码；若未设置则在首次启动日志中查看）' -ForegroundColor Gray
     Write-Host '2. 进入「存储」→「添加」，挂载你的本地目录或网盘' -ForegroundColor White
     Write-Host '3. 回到 Cpolar Web（http://localhost:9200）确认以下隧道已在线：' -ForegroundColor White
     foreach ($t in $Tunnels) { Write-Host "   - $t" -ForegroundColor Gray }
@@ -688,6 +755,7 @@ $values = @{
     WebhookUrl     = $WebhookUrl
     CpolarUser     = $CpolarUser
     CpolarPassword = $CpolarPassword
+    OpenlistPassword = $OpenlistPassword
     TunnelNames    = $TunnelNames
     Interval       = $Interval
 }
@@ -707,6 +775,11 @@ $configOk = New-GuardConfigFile -Values $values -PrimaryPath $primaryConfig -Run
 if (-not $configOk -and -not $DryRun) {
     Write-Log 'ERROR' '配置写入失败，后续步骤已中止'
     exit 1
+}
+
+# --- 阶段 4.5：设置 Openlist 登录密码 -------------------------
+if (-not $SkipOpenlist) {
+    [void](Set-OpenlistAdminPassword -OpenlistDir $openlistDir -Password $values.OpenlistPassword)
 }
 
 # --- 阶段 5：Cpolar 隧道 --------------------------------------
