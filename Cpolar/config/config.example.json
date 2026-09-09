@@ -13,7 +13,6 @@
 
   "_username": "Cpolar Web 登录邮箱",
   "username": "",
-
   "_password": "Cpolar Web 登录密码",
   "password": "",
 
@@ -21,5 +20,5 @@
   "keyword": "Cpolar",
 
   "_debug": "调试日志开关，true=输出详细 API 响应和运行日志",
-  "debug": true
+  "debug": false
 }

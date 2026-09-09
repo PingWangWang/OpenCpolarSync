@@ -1,19 +1,61 @@
-# 忽略 Openlist 数据目录（配置、数据库、日志、临时文件）
+# ============================================================
+# 运行时产物：日志
+# ============================================================
+
+# Openlist 数据目录（配置、数据库、日志、临时文件）
 Openlist/data/
 Openlist/bin/data/
 
-# 忽略 Openlist 守护日志（按周轮转归档，不纳入版本控制）
-Openlist/logs/guard.log
-Openlist/logs/guard.log.*
+# Openlist 守护日志（按周轮转归档，不纳入版本控制）
+Openlist/logs/
 
-# 忽略 Cpolar 守护日志（按周轮转归档，不纳入版本控制）
-Cpolar/logs/guard.log
-Cpolar/logs/guard.log.*
+# Cpolar 守护日志（按周轮转归档，不纳入版本控制）
+Cpolar/logs/
 
-# 忽略 Openlist 大文件（通过发布包单独分发）
+# Watchdog 恢复日志
+Watchdog/*.log
+
+# ============================================================
+# 敏感配置：含明文密码，禁止入库
+# ============================================================
+
+# config.json 主副本位于 %LOCALAPPDATA%\OpenCpolarSync\config；
+# 仓库内 Cpolar\config\ 下的副本由 setup.ps1 每次运行同步生成，含登录密码。
+# 模板请参考 Cpolar\config\config.example.json
+Cpolar/config/config.json
+Cpolar/config/last-sent.json
+
+# ============================================================
+# 大文件 / 二进制：通过发布包单独分发
+# ============================================================
+
+# Openlist 主程序（由 setup.ps1 从 archive/openlist.zip 自动解压）
 Openlist/openlist.exe
 Openlist/bin/*.exe
 Openlist/bin/*.7z
 Openlist/bin/*.tar.gz
 Openlist/archive/*.7z
 Openlist/archive/*.tar.gz
+
+# ============================================================
+# 第三方参考脚本：仅本地参考，不随仓库分发
+# ============================================================
+
+Win11Debloat Script CN.ps1
+
+# ============================================================
+# 临时 / 本地工作目录
+# ============================================================
+
+# 一键部署临时解压目录
+ocs-openlist-extract/
+
+# AI 协作工作目录（自测脚本、日志与工作记录）
+.workbuddy/
+
+# 编辑器与系统文件
+.vs/
+.vscode/
+*.user
+Thumbs.db
+desktop.ini
