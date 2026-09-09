@@ -1,3 +1,24 @@
+﻿param(
+    [ValidateSet('GitHub', 'Gitee', 'Local')]
+    [string]$Source = 'GitHub',
+
+    [string]$RepoUrl,
+    [string]$Branch = 'main',
+    [string]$InstallDir,
+    [string]$LocalArchivePath,
+
+    [switch]$NoSetup,
+    [switch]$DryRun,
+
+    [string]$WebhookUrl,
+    [string]$CpolarUser,
+    [string]$CpolarPassword,
+    [string[]]$TunnelNames,
+    [string]$AuthToken,
+    [int]$Interval,
+    [switch]$Silent
+)
+
 <#
 .SYNOPSIS
     OpenCpolarSync 一键启动器（免 clone 部署入口）。
@@ -15,13 +36,14 @@
     irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
     # 或 GitHub 源（默认会自动回退 Gitee / 代理镜像下载）：
     irm https://raw.githubusercontent.com/PingWangWang/OpenCpolarSync/main/bootstrap.ps1 | iex
+    # 或下载到本地后直接运行（本脚本为 UTF-8 with BOM，.\\ 直接跑不乱码）：
+    .\bootstrap.ps1
 
-    编码说明：本脚本刻意保存为【无 BOM】的 UTF-8。原因是 irm 返回的内容若带 BOM，
-    BOM 字符会进入脚本字符串开头，Windows PowerShell 5.1 会解析失败（注释块失效、
-    中文被当作语句）。去掉 BOM 后 irm|iex 在 5.1 与 7.x 下均正常，且中文正确显示
-    （irm 返回的是内存中的 Unicode 字符串，不经过文件读取）。
-    代价：不要以文件方式执行本脚本（5.1 按系统 ANSI 代码页读取无 BOM 文件会损坏中文），
-    已 clone 仓库时请直接运行 setup.ps1。
+    编码说明：本脚本保存为【UTF-8 with BOM】。原因：本地以 .\\ 直接运行时，Windows
+    PowerShell 5.1 需靠 BOM 识别 UTF-8，否则中文会被按系统 ANSI（GBK）解码而乱码；
+    而 irm 拉取时 .NET 会在解码阶段自动剥离 BOM（字符串首个字符即为 param，不含 BOM），
+    因此 BOM 不影响 irm | iex。为保证两者兼容，本脚本把 param() 放在文件最前、
+    注释块移到其后（BOM 顶在 param 前无害）。对齐 Win11Debloat 的 Get_CN.ps1 做法。
 .PARAMETER Source
     下载来源：GitHub（默认）、Gitee 或 Local（使用本地 zip）。
 .PARAMETER RepoUrl
@@ -47,31 +69,10 @@
     .\bootstrap.ps1 -Source Gitee
     从 Gitee 镜像下载（GitHub 访问不畅时使用）。
 .NOTES
-    Version: 1.2
+    Version: 1.3
     Compatible: Windows 7 SP1+ / PowerShell 5.0+
                 实测通过：Windows PowerShell 5.1.26100（Windows 预装版）、PowerShell 7.6.4
 #>
-
-param(
-    [ValidateSet('GitHub', 'Gitee', 'Local')]
-    [string]$Source = 'GitHub',
-
-    [string]$RepoUrl,
-    [string]$Branch = 'main',
-    [string]$InstallDir,
-    [string]$LocalArchivePath,
-
-    [switch]$NoSetup,
-    [switch]$DryRun,
-
-    [string]$WebhookUrl,
-    [string]$CpolarUser,
-    [string]$CpolarPassword,
-    [string[]]$TunnelNames,
-    [string]$AuthToken,
-    [int]$Interval,
-    [switch]$Silent
-)
 
 $ErrorActionPreference = 'Stop'
 

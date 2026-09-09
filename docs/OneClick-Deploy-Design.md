@@ -258,25 +258,44 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 | 5.1 默认不启用 TLS 1.2，下载 GitHub 归档会失败 | `bootstrap.ps1` 显式设置 `[Net.ServicePointManager]::SecurityProtocol = Tls12` |
 | `Invoke-WebRequest` 在 5.1 依赖 IE 引擎 | 统一加 `-UseBasicParsing` |
 | `ConvertTo-Json` 在 5.1 会把中文转义成 `\uXXXX` | 自实现 `ConvertTo-JsonEscapedString` 生成 JSON |
-| **5.1 按系统 ANSI 代码页（GBK）解析无 BOM 的 UTF-8 文件，中文会损坏并导致语法错误** | **以本地文件方式执行的脚本**（`setup.ps1`、`CpolarGuard.ps1`）统一保存为 **UTF-8 with BOM**（已在自测中实测复现该问题） |
-| **`bootstrap.ps1` 专供 `irm \| iex`，必须【无 BOM】** | `irm` 返回的是内存中的 Unicode 字符串：若带 BOM，BOM 字符会进入脚本开头使注释块 `<# #>` 失效、中文被当作语句而 `ParserError`；无 BOM 时 5.1/7.x 均正常。代价：不要以文件方式直接运行 `bootstrap.ps1`，已 clone 时请用 `setup.ps1` |
+| **5.1 按系统 ANSI 代码页（GBK）解析无 BOM 的 UTF-8 文件，中文会损坏并导致语法错误** | **以本地文件方式执行的脚本**统一保存为 **UTF-8 with BOM**（已在自测中实测复现该问题） |
+| **`bootstrap.ps1` 同时支持 `irm \| iex` 与 `.\` 直接运行** | 保存为 **UTF-8 with BOM**，并把 `param()` 放在文件最前、`<# #>` 注释块移到其后（对齐 Win11Debloat 的 `Get_CN.ps1`）。`irm` 拉取时 .NET 在解码阶段自动剥离 BOM（字符串首字符即为 `param`，不含 BOM），故 BOM 不影响 `irm \| iex`；本地 `.\` 跑时 5.1 靠 BOM 识别 UTF-8，中文不乱码 |
 | 5.1 控制台默认 GBK，强制设 `OutputEncoding = UTF8` 会让中文乱码 | 仅在 PS 6+ 或控制台已是 65001 时设置 |
 | `bootstrap.ps1` 硬编码 `powershell.exe` 会把 setup 降级到 5.1 | 改用当前宿主进程路径（5.1 → powershell.exe，7.x → pwsh.exe） |
 
-> **BOM 实测两条路径**（均已在 5.1.26100 验证）：
-> - 无 BOM 的本地文件 → 5.1 按 GBK 解析，中文常量变成「缁撴潫」，抛 `ParserError: 字符串缺少终止符`（最初自测的测试脚本就中招）。
-> - 带 BOM 的脚本经 `irm \| iex` → BOM 进入字符串开头，注释块失效，中文被当代码，报「表达式或语句中包含意外的标记『从』」等。
-> - 结论：本地执行脚本要 BOM，远程 `irm \| iex` 脚本要无 BOM，二者方向相反，靠「执行方式」区分而非统一。
+> **BOM 结论修正**（5.1.26100 + 7.6.4 实测）：
+> - 无 BOM 的本地文件 → 5.1 按 GBK 解析，中文常量变成「缁撴潫」，抛 `ParserError: 字符串缺少终止符`。
+> - **带 BOM 的脚本经 `irm \| iex` 是否失败，取决于脚本开头**：若开头是 `<# #>` 注释块，BOM 顶在 `<#` 前会使其失效、中文被当代码而报错（早期实测复现）；若开头是 `param(`（或普通语句），BOM 会被 `irm` 的 .NET 解码器自动剥离，**不影响解析执行**（本次以字节级证据验证：`irm` 拿到的字符串首字符已是 `param`，无 BOM）。
+> - 结论：让一个脚本同时兼容两种跑法的正确姿势是 **BOM + `param()` 在前**（对齐 `Get_CN.ps1`），而非「无 BOM 专供 irm」。本次已将 `bootstrap.ps1` 据此改造，`setup.ps1` / `CpolarGuard.ps1` 本就是 BOM + `param`/注释，保持不变。
 
 ### 6.2 bootstrap.ps1 一行命令可靠性修复（发布后补充）
 
 发布后真实环境（用户在国内网络）暴露两个问题，已修复：
 
 1. **`raw.githubusercontent.com` 解析失败（DNS）**：用户网络不通 GitHub。修复：README 把 **Gitee 镜像 raw 地址** 作为国内首选一行命令；同时 `bootstrap.ps1` 下载仓库 zip 增加 **GitHub → Gitee 自动回退**（`irm \| iex` 无法传 `-Source` 参数，故必须在脚本内自动降级）。
-2. **`iex` 解析失败（BOM 导致）**：原 `bootstrap.ps1` 带 BOM，经 `irm \| iex` 后注释块失效。修复：移除 BOM（见 6.1）。
+2. **`iex` 解析失败（BOM 导致，早期结论已修正）**：原 `bootstrap.ps1` 带 BOM 且开头是 `<#` 注释块，经 `irm \| iex` 后注释块失效。修复：移除 BOM（见 6.1 的早期处理）。
 3. **`Expand-Archive` 解压阶段崩溃「找不到中央目录结尾记录」**：用户在国内网络下，GitHub 不通 → 回退 Gitee 时，镜像返回 **HTTP 200 的 HTML 登录/拦截页（约 40KB）**，被当成 zip 下载，解压即崩。修复：`Get-RepoArchive` 下载后做**两道前置校验**——(a) 响应 `Content-Type` 为 `text/html` 直接抛「返回内容类型为 HTML」并提示登录页/错误页；(b) `Test-ZipFile` 校验 **ZIP 魔数（PK）+ 可打开完整性**，魔数不符抛「不是有效的 ZIP 压缩包」；两者均在 `Expand-Archive` 之前拦截，使「所有来源失败」能优雅回退并给出排查建议（离线 Local / git clone Gitee + setup.ps1 / 手动 zip）。同时下载源链补充 **GitHubProxy（ghproxy 代理镜像）**，默认顺序调整为 **`GitHub → Gitee → GitHubProxy`**：Gitee 是国内自有镜像，通常比第三方代理更稳；GitHubProxy 作为最后兜底，并使用实测可用的 **`gh.ddlc.top`** 域名（原 `ghproxy.com` 在部分网络下会长时间无响应或只建隧道不返回数据）。`Get-RepoArchive` 还新增 **`-TimeoutSec 45`**，避免代理镜像卡死导致用户以为 PowerShell 无响应直接退出。`Test-ZipFile` 仅以魔数为硬门槛、完整性打开为尽力而为（不误杀合法 zip），并**移除了原先 `-lt 1024` 的长度门槛**（会误杀合法的小体积 zip，属 false negative）。已用自测脚本在 **PowerShell 5.1 与 7.x** 下覆盖：DryRun 列出三源、真 zip 解压成功、本地假 HTML 被拒、镜像返回 HTML 在下载阶段拦截、镜像返回非 ZIP 被拒——全部 PASS。
 
-> Gitee 镜像源假设仓库 `pingwang1994/OpenCpolarSync` 已存在；若该镜像未建立，则 Gitee 回退同样失败，需改用 `-Source Local` 离线归档。bootstrap.ps1 仍为**无 BOM UTF-8（LF）**，供 `irm \| iex` 使用。
+> Gitee 镜像源假设仓库 `pingwang1994/OpenCpolarSync` 已存在；若该镜像未建立，则 Gitee 回退同样失败，需改用 `-Source Local` 离线归档。
+
+### 6.3 bootstrap.ps1 双跑法改造（对齐 Win11Debloat Get_CN.ps1）
+
+用户反馈：参考 Win11Debloat 的 `Get_CN.ps1`（`irm ... | iex` 和 `.\` 直接跑都行），希望 `bootstrap.ps1` 也支持 `.\` 直接运行（此前无 BOM，5.1 下 `.\` 跑会中文乱码、语法崩溃）。
+
+**改造内容**：
+1. `bootstrap.ps1` 从「无 BOM + 开头 `<#` 注释块」改为 **「UTF-8 with BOM + `param()` 在前」**，`<# ... #>` 帮助注释块整体移到 `param()` 之后。
+2. 版本号 v1.2 → v1.3，注释内补充编码说明与双跑法用法。
+
+**为何可行（实测验证，非仅推理）**：
+- `irm` 返回字符串时，.NET 解码器会**自动剥离 UTF-8 BOM**——用字节级证据确认：`irm` 拿到的字符串首字符已是 `p`（`param`），UTF-16 字节为 `70 00 61 00`，不含 `EF BB BF`。因此 BOM 不会进入脚本内容、不影响解析。
+- `param()` 在文件最前，即便有 BOM 残留也无害（与 `<#` 注释块被 BOM 顶坏的情况不同）。
+- 本地 `.\` 跑时，PS 5.1 靠 BOM 识别 UTF-8，中文正确解码。
+
+**双引擎实测**（5.1.26100 + 7.6.4）：
+- `.\bootstrap.ps1 -DryRun` → 中文正常（「一键部署」「演练模式」等无乱码），三源顺序正确，零错误。
+- `[scriptblock]::Create(内容)`（`irm|iex` 的解析层）→ `PARSE OK`，无语法错误。
+
+**结论**：一个脚本同时兼容 `irm|iex` 与 `.\` 的正确姿势是 **BOM + `param()` 在前**，而非「无 BOM 专供 irm」。此前「本地脚本要 BOM、远程脚本要无 BOM」的二分法，在此场景下被更优的统一方案取代。
 
 ---
 
