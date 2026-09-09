@@ -120,8 +120,17 @@ foreach ($procName in $processes) {
     }
 }
 if ($stopped.Count -gt 0) {
+    Write-Log 'OK' "已停止 $($stopped.Count) 个进程，等待文件句柄释放..."
+    # 等待进程完全退出并释放文件句柄，最多等 15 秒
+    for ($i = 0; $i -lt 15; $i++) {
+        $stillRunning = $false
+        foreach ($procName in @('openlist', 'cpolar')) {
+            if (Get-Process -Name $procName -ErrorAction SilentlyContinue) { $stillRunning = $true; break }
+        }
+        if (-not $stillRunning) { break }
+        Start-Sleep -Seconds 1
+    }
     Start-Sleep -Seconds 2
-    Write-Log 'OK' "已停止 $($stopped.Count) 个进程"
 } else {
     Write-Log 'OK' '没有运行中的相关进程'
 }
@@ -173,12 +182,33 @@ Write-Host '--- 阶段 3：删除程序文件 ---' -ForegroundColor Cyan
 
 if (Test-Path $appDir) {
     Write-Log 'STEP' "删除程序目录：$appDir"
-    try {
-        Remove-Item -Path $appDir -Recurse -Force -ErrorAction Stop
+    # 重试 3 次，每次间隔 3 秒，应对文件句柄延迟释放
+    $deleted = $false
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            # 先尝试逐个删除文件，遇到被占用的文件跳过，避免整体失败
+            Get-ChildItem -Path $appDir -Recurse -Force -ErrorAction SilentlyContinue |
+                Sort-Object { $_.FullName.Length } -Descending |
+                ForEach-Object {
+                    try { Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction Stop }
+                    catch { }
+                }
+            Remove-Item -Path $appDir -Recurse -Force -ErrorAction Stop
+            $deleted = $true
+            break
+        } catch {
+            if ($attempt -lt 3) {
+                Write-Log 'WARN' "第 $attempt 次删除失败，3 秒后重试：$($_.Exception.Message)"
+                Start-Sleep -Seconds 3
+            } else {
+                Write-Log 'ERROR' "删除程序目录失败（已重试 3 次）：$($_.Exception.Message)"
+            }
+        }
+    }
+    if ($deleted) {
         Write-Log 'OK' '程序目录已删除'
-    } catch {
-        Write-Log 'ERROR' "删除程序目录失败：$($_.Exception.Message)"
-        Write-Host '  可能有文件被占用，请关闭相关程序后重试。' -ForegroundColor Yellow
+    } else {
+        Write-Host '  仍有文件被占用，重启电脑后可手动删除该目录。' -ForegroundColor Yellow
     }
 } else {
     Write-Log 'INFO' '程序目录不存在，跳过'
