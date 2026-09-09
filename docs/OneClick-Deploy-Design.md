@@ -167,8 +167,8 @@ setup.ps1（核心向导）
 
 | 文件 | 类型 | 说明 |
 |------|------|------|
-| `setup.ps1` | 新增 | 部署向导核心（UTF-8 BOM + LF） |
-| `bootstrap.ps1` | 新增 | 免 clone 启动器（UTF-8 BOM + LF） |
+| `setup.ps1` | 新增 | 部署向导核心（UTF-8 BOM + LF，**始终以本地文件方式执行**） |
+| `bootstrap.ps1` | 新增 | 免 clone 启动器（**UTF-8 无 BOM + LF**，专供 `irm \| iex` 远程一行命令） |
 | `Cpolar/CpolarGuard.ps1` | 修改 | 新增 `-ConfigPath` 参数（+20 / -2 行） |
 
 ---
@@ -258,11 +258,24 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 | 5.1 默认不启用 TLS 1.2，下载 GitHub 归档会失败 | `bootstrap.ps1` 显式设置 `[Net.ServicePointManager]::SecurityProtocol = Tls12` |
 | `Invoke-WebRequest` 在 5.1 依赖 IE 引擎 | 统一加 `-UseBasicParsing` |
 | `ConvertTo-Json` 在 5.1 会把中文转义成 `\uXXXX` | 自实现 `ConvertTo-JsonEscapedString` 生成 JSON |
-| **5.1 按系统 ANSI 代码页（GBK）解析无 BOM 的 UTF-8 脚本，中文会损坏并导致语法错误** | 所有脚本统一保存为 **UTF-8 with BOM**（已在自测中实测复现该问题） |
+| **5.1 按系统 ANSI 代码页（GBK）解析无 BOM 的 UTF-8 文件，中文会损坏并导致语法错误** | **以本地文件方式执行的脚本**（`setup.ps1`、`CpolarGuard.ps1`）统一保存为 **UTF-8 with BOM**（已在自测中实测复现该问题） |
+| **`bootstrap.ps1` 专供 `irm \| iex`，必须【无 BOM】** | `irm` 返回的是内存中的 Unicode 字符串：若带 BOM，BOM 字符会进入脚本开头使注释块 `<# #>` 失效、中文被当作语句而 `ParserError`；无 BOM 时 5.1/7.x 均正常。代价：不要以文件方式直接运行 `bootstrap.ps1`，已 clone 时请用 `setup.ps1` |
 | 5.1 控制台默认 GBK，强制设 `OutputEncoding = UTF8` 会让中文乱码 | 仅在 PS 6+ 或控制台已是 65001 时设置 |
 | `bootstrap.ps1` 硬编码 `powershell.exe` 会把 setup 降级到 5.1 | 改用当前宿主进程路径（5.1 → powershell.exe，7.x → pwsh.exe） |
 
-> 实测复现记录：最初用无 BOM 的 UTF-8 测试脚本在 5.1 下运行，中文常量被 GBK 解码为「缁撴潫」并抛出 `ParserError: 字符串缺少终止符`。主脚本因带 BOM 未受影响，该问题已在自测覆盖范围内。
+> **BOM 实测两条路径**（均已在 5.1.26100 验证）：
+> - 无 BOM 的本地文件 → 5.1 按 GBK 解析，中文常量变成「缁撴潫」，抛 `ParserError: 字符串缺少终止符`（最初自测的测试脚本就中招）。
+> - 带 BOM 的脚本经 `irm \| iex` → BOM 进入字符串开头，注释块失效，中文被当代码，报「表达式或语句中包含意外的标记『从』」等。
+> - 结论：本地执行脚本要 BOM，远程 `irm \| iex` 脚本要无 BOM，二者方向相反，靠「执行方式」区分而非统一。
+
+### 6.2 bootstrap.ps1 一行命令可靠性修复（发布后补充）
+
+发布后真实环境（用户在国内网络）暴露两个问题，已修复：
+
+1. **`raw.githubusercontent.com` 解析失败（DNS）**：用户网络不通 GitHub。修复：README 把 **Gitee 镜像 raw 地址** 作为国内首选一行命令；同时 `bootstrap.ps1` 下载仓库 zip 增加 **GitHub → Gitee 自动回退**（`irm \| iex` 无法传 `-Source` 参数，故必须在脚本内自动降级）。
+2. **`iex` 解析失败（BOM 导致）**：原 `bootstrap.ps1` 带 BOM，经 `irm \| iex` 后注释块失效。修复：移除 BOM（见 6.1）。
+
+> Gitee 镜像源假设仓库 `pingwang1994/OpenCpolarSync` 已存在；若该镜像未建立，则 Gitee 回退同样失败，需改用 `-Source Local` 离线归档。
 
 ---
 
@@ -271,7 +284,7 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 | # | 事项 | 说明 |
 |---|------|------|
 | 1 | **Openlist 存储挂载仍为人工** | 挂载配置存于 openlist 自身数据库，跨版本格式不稳，强写易碎。当前只做「打开 Web + 步骤清单 + 隧道校验」引导 |
-| 2 | **GitHub 国内访问** | 已实现 GitHub / Gitee / 本地三源切换（`-Source`），默认 GitHub；访问不畅时建议 `-Source Gitee` |
+| 2 | **GitHub 国内访问** | 已实现 GitHub / Gitee / 本地三源；`bootstrap.ps1` 默认 GitHub 且**下载阶段自动回退 Gitee**，国内一行命令无需手动追加参数 |
 | 3 | **cpolar.yml 字段需实机验证** | 隧道 yml 的写法依据 `cpolar --help` 推导，建议在真机首次运行后确认隧道能正常建立 |
 | 4 | **CpolarGuard.ps1 编码** | 保持原有 BOM + CRLF（避免 1109 行全量 diff）；新增脚本统一 BOM + LF。如需全仓库统一换行，建议单独一次提交处理 |
 

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     OpenCpolarSync 一键启动器（免 clone 部署入口）。
 .DESCRIPTION
@@ -11,7 +11,17 @@
     因此重复运行本脚本升级程序时不会覆盖已有配置（对齐 Win11Debloat 的做法）。
 
     典型用法（在 PowerShell 中粘贴执行）：
+    # 国内网络（GitHub 不通）优先用 Gitee 镜像获取本脚本：
+    irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
+    # 或 GitHub 源（默认会自动回退 Gitee 下载）：
     irm https://raw.githubusercontent.com/PingWangWang/OpenCpolarSync/main/bootstrap.ps1 | iex
+
+    编码说明：本脚本刻意保存为【无 BOM】的 UTF-8。原因是 irm 返回的内容若带 BOM，
+    BOM 字符会进入脚本字符串开头，Windows PowerShell 5.1 会解析失败（注释块失效、
+    中文被当作语句）。去掉 BOM 后 irm|iex 在 5.1 与 7.x 下均正常，且中文正确显示
+    （irm 返回的是内存中的 Unicode 字符串，不经过文件读取）。
+    代价：不要以文件方式执行本脚本（5.1 按系统 ANSI 代码页读取无 BOM 文件会损坏中文），
+    已 clone 仓库时请直接运行 setup.ps1。
 .PARAMETER Source
     下载来源：GitHub（默认）、Gitee 或 Local（使用本地 zip）。
 .PARAMETER RepoUrl
@@ -169,11 +179,14 @@ Write-Host ''
 Write-Host '--- 阶段 1：获取程序文件 ---' -ForegroundColor Cyan
 
 if ($DryRun) {
-    $url = Resolve-ArchiveUrl -From $Source -RefBranch $Branch -Custom $RepoUrl
     if ($Source -eq 'Local') {
         Write-Log 'INFO' "计划使用本地归档：$LocalArchivePath"
     } else {
-        Write-Log 'INFO' "计划下载：$url"
+        $drySources = if ($Source -eq 'GitHub') { @('GitHub', 'Gitee') } else { @($Source) }
+        foreach ($s in $drySources) {
+            Write-Log 'INFO' "计划下载（$s）：$(Resolve-ArchiveUrl -From $s -RefBranch $Branch -Custom $RepoUrl)"
+        }
+        Write-Log 'INFO' '（GitHub 不通时自动回退 Gitee）'
     }
     Write-Log 'INFO' "计划解压到：$appDir"
 } elseif ($Source -eq 'Local') {
@@ -185,15 +198,28 @@ if ($DryRun) {
     Write-Log 'OK' "使用本地归档：$LocalArchivePath"
     $tempZip = $LocalArchivePath
 } else {
-    $url = Resolve-ArchiveUrl -From $Source -RefBranch $Branch -Custom $RepoUrl
-    try {
-        Get-RepoArchive -Url $url -Destination $tempZip
-    } catch {
-        Write-Log 'ERROR' "下载失败：$($_.Exception.Message)"
+    # 下载来源列表：默认 GitHub，失败时自动回退 Gitee，让「irm | iex」一行命令
+    # 在国内网络（GitHub 不通）也能跑通，无需用户手动追加 -Source Gitee。
+    $trySources = if ($Source -eq 'GitHub') { @('GitHub', 'Gitee') } else { @($Source) }
+
+    $downloaded = $false
+    foreach ($trySrc in $trySources) {
+        $url = Resolve-ArchiveUrl -From $trySrc -RefBranch $Branch -Custom $RepoUrl
+        try {
+            Write-Log 'INFO' "尝试来源：$trySrc"
+            Get-RepoArchive -Url $url -Destination $tempZip
+            $downloaded = $true
+            break
+        } catch {
+            Write-Log 'WARN' "$trySrc 下载失败：$($_.Exception.Message)"
+            if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    if (-not $downloaded) {
+        Write-Log 'ERROR' '所有来源下载失败'
         Write-Host ''
-        Write-Host '若当前网络无法访问 GitHub，可改用 Gitee 镜像：' -ForegroundColor Yellow
-        Write-Host '  .\bootstrap.ps1 -Source Gitee' -ForegroundColor Yellow
-        Write-Host '或使用本地归档包：' -ForegroundColor Yellow
+        Write-Host '可改用本地归档包离线部署：' -ForegroundColor Yellow
         Write-Host '  .\bootstrap.ps1 -Source Local -LocalArchivePath "D:\path\to\main.zip"' -ForegroundColor Yellow
         exit 1
     }

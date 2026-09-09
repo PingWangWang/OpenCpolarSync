@@ -24,17 +24,21 @@ OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三�
 
 ### 方式 A：免 clone，一条命令
 
-在 **Windows PowerShell** 中粘贴执行（无需安装 git，无需手动 clone）：
+在 **Windows PowerShell** 中粘贴执行（无需安装 git，无需手动 clone）。
+
+**国内网络（GitHub 不通）优先用 Gitee 镜像获取启动器：**
+
+```powershell
+irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
+```
+
+GitHub 源（默认会自动回退 Gitee 下载，因此即使从 GitHub 获取本脚本也能跑通）：
 
 ```powershell
 irm https://raw.githubusercontent.com/PingWangWang/OpenCpolarSync/main/bootstrap.ps1 | iex
 ```
 
-GitHub 访问不畅时，改用 Gitee 镜像：
-
-```powershell
-irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
-```
+> 提示：`bootstrap.ps1` 保存为**无 BOM 的 UTF-8**，正是为了让 `irm | iex` 在系统预装的 Windows PowerShell 5.1 下也能正确解析（带 BOM 会导致注释块失效、中文被当作语句而报错）。已 clone 仓库时请直接运行 `setup.ps1`（见方式 B）。
 
 ### 方式 B：已 clone 仓库
 
