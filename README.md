@@ -29,16 +29,21 @@ OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三�
 **国内网络（GitHub 不通）优先用 Gitee 镜像获取启动器：**
 
 ```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
 ```
 
 GitHub 源（默认会自动回退 Gitee 下载，因此即使从 GitHub 获取本脚本也能跑通）：
 
 ```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 irm https://raw.githubusercontent.com/PingWangWang/OpenCpolarSync/main/bootstrap.ps1 | iex
 ```
 
-> 提示：`bootstrap.ps1` 保存为**无 BOM 的 UTF-8**，正是为了让 `irm | iex` 在系统预装的 Windows PowerShell 5.1 下也能正确解析（带 BOM 会导致注释块失效、中文被当作语句而报错）。已 clone 仓库时请直接运行 `setup.ps1`（见方式 B）。
+> **提示 1：为什么要先执行那一行 `Tls12`？**  
+> Windows PowerShell 5.1（系统预装版）默认只启用 `Ssl3|Tls`，而 Gitee raw 会 302 跳转到 `raw.giteeusercontent.com` CDN，该 CDN 要求 TLS 1.2+。若不先开 TLS 1.2，`irm` 会在建立连接阶段报 `基础连接已经关闭: 发送时发生错误`。这一行只需执行一次（在当前 PowerShell 窗口生效），之后再跑 `irm ... | iex` 就无需重复。
+>
+> **提示 2：**`bootstrap.ps1` 保存为**无 BOM 的 UTF-8**，正是为了让 `irm | iex` 在系统预装的 Windows PowerShell 5.1 下也能正确解析（带 BOM 会导致注释块失效、中文被当作语句而报错）。已 clone 仓库时请直接运行 `setup.ps1`（见方式 B）。
 
 ### 方式 B：已 clone 仓库
 
