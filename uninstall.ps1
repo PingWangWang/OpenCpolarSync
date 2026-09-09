@@ -68,7 +68,7 @@ function Confirm-Action {
 # ============================================================
 # 主流程
 # ============================================================
-try { Clear-Host } catch { }
+# 不清屏，直接在当前命令行输出
 Write-Host '==========================================' -ForegroundColor Cyan
 Write-Host ' OpenCpolarSync 卸载向导' -ForegroundColor Cyan
 Write-Host '==========================================' -ForegroundColor Cyan

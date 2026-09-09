@@ -670,8 +670,7 @@ function Show-FinalChecklist {
 # 主流程
 # ============================================================
 
-# 清屏在非控制台环境下同样可能失败，做保护处理
-try { Clear-Host } catch { }
+# 不清屏，直接在当前命令行输出
 Write-Host '==========================================' -ForegroundColor Cyan
 Write-Host ' OpenCpolarSync 一键部署向导' -ForegroundColor Cyan
 Write-Host '==========================================' -ForegroundColor Cyan
