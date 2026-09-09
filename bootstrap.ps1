@@ -31,6 +31,7 @@ try {
 } catch { }
 
 # -DryRun / -NoElevate are used for testing; they run in-place without elevation.
+# -Uninstall triggers uninstall mode instead of install.
 $noElevate = ($args -contains '-NoElevate') -or ($args -contains '-DryRun')
 
 if ($isAdmin -or $noElevate) {

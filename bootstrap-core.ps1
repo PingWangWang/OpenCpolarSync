@@ -10,6 +10,7 @@
     [switch]$NoSetup,
     [switch]$DryRun,
     [switch]$Force,
+    [switch]$Uninstall,
 
     [string]$WebhookUrl,
     [string]$CpolarUser,
@@ -314,8 +315,59 @@ function Get-RepoArchiveFromRelease {
 # 清屏在非控制台环境下可能失败，做保护处理
 try { Clear-Host } catch { }
 Write-Host '==========================================' -ForegroundColor Cyan
-Write-Host ' OpenCpolarSync 一键部署' -ForegroundColor Cyan
+Write-Host ' OpenCpolarSync 一键部署向导' -ForegroundColor Cyan
 Write-Host '==========================================' -ForegroundColor Cyan
+
+# --- 操作选择：安装 / 卸载 ---------------------------------------------------
+$action = $null
+if ($Uninstall) {
+    $action = 'uninstall'
+} elseif ($Silent) {
+    $action = 'install'
+} else {
+    Write-Host ''
+    Write-Host '  请选择操作：' -ForegroundColor White
+    Write-Host '    1. 安装 / 更新 OpenCpolarSync' -ForegroundColor White
+    Write-Host '    2. 卸载 OpenCpolarSync' -ForegroundColor White
+    Write-Host ''
+    $choice = Read-Host '请输入序号 (1/2) [默认 1]'
+    if ($choice -eq '2') {
+        $action = 'uninstall'
+    } else {
+        $action = 'install'
+    }
+}
+
+# --- 卸载分支：直接调用卸载脚本并退出 ----------------------------------------
+if ($action -eq 'uninstall') {
+    Write-Host ''
+    Write-Host '--- 卸载模式 ---' -ForegroundColor Cyan
+
+    if (-not $InstallDir) {
+        $InstallDir = Join-Path $env:LOCALAPPDATA 'OpenCpolarSync'
+    }
+    $appDir = Join-Path $InstallDir 'app'
+
+    # 优先使用已安装的 uninstall.ps1，否则从下载的仓库中找
+    $uninstallPath = Join-Path $appDir 'uninstall.ps1'
+    if (-not (Test-Path $uninstallPath)) {
+        # 尝试从当前脚本目录找（本地运行时）
+        $localUninstall = Join-Path $PSScriptRoot 'uninstall.ps1'
+        if (Test-Path $localUninstall) {
+            $uninstallPath = $localUninstall
+        } else {
+            Write-Log 'ERROR' '未找到 uninstall.ps1，无法执行卸载'
+            Write-Host '  请手动删除以下目录完成卸载：' -ForegroundColor Yellow
+            Write-Host "    程序目录：$appDir" -ForegroundColor Yellow
+            Write-Host "    配置目录：$(Join-Path $InstallDir 'config')" -ForegroundColor Yellow
+            exit 1
+        }
+    }
+
+    Write-Log 'STEP' "执行卸载脚本：$uninstallPath"
+    & $uninstallPath -InstallDir $InstallDir
+    exit 0
+}
 
 # --- 路径解析 -------------------------------------------------------------
 if (-not $InstallDir) {
