@@ -297,6 +297,25 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 
 **结论**：一个脚本同时兼容 `irm|iex` 与 `.\` 的正确姿势是 **BOM + `param()` 在前**，而非「无 BOM 专供 irm」。此前「本地脚本要 BOM、远程脚本要无 BOM」的二分法，在此场景下被更优的统一方案取代。
 
+### 6.4 TLS 证书回调 bug 修复（三源统一「基础连接已经关闭」）
+
+**触发**：用户在本机 `.\` 直接运行 bootstrap，三个源（GitHub / Gitee / GitHubProxy）**统一**报 `基础连接已经关闭: 发送时发生错误`，但用户执行 `Get_CN.ps1` 却能正常下载。
+
+**根因**：`Get-RepoArchive` 里有两行 `ServicePointManager` 全局设置，其中第 2 行是元凶：
+```powershell
+[System.Net.ServicePointManager]::SecurityProtocol = ... -bor [System.Net.SecurityProtocolType]::Tls12
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }  # ← 问题所在
+```
+`ServerCertificateValidationCallback` 是 **AppDomain 级全局回调**，设为 `{ $true }` 会干扰/破坏 .NET 底层 TLS 握手，在有代理/防火墙做 TLS 拦截的环境下，握手在「发送」阶段即失败 → 三个源报同一个错（不可能是三站同时挂）。而 `Get_CN.ps1` 完全不碰这些设置，靠 PowerShell 默认行为即可正常下载。
+
+**修复（v1.4）**：
+1. **删除** `ServerCertificateValidationCallback = { $true }`（全局关证书校验既有副作用又有安全风险）。
+2. 保留显式 `Tls12`（PS 5.1 默认仅 Ssl3|Tls，连不上要求 TLS1.2+ 的 CDN，这个是有必要的），但改为更明确的 `[System.Net.SecurityProtocolType]::Tls12` 直接赋值。
+
+**实测**：删除回调后，真实下载 Gitee 归档成功（TLS 握手通过，不再报「基础连接已经关闭」）；沙箱访问 Gitee 返回 HTML 登录页，两层防护（`Content-Type=text/html` 拦截 + ZIP 魔数校验）均正常识别并会回退。用户本机（自有国内镜像）可拿到真 zip。
+
+**教训**：`ServerCertificateValidationCallback` 这类 AppDomain 级全局设置不要轻易在脚本里设置；「放宽证书校验」的初衷（绕开 CRYPT_E_NO_REVOCATION_CHECK）应交给环境本身处理（如 `git -c http.schannelCheckRevoke=false` 仅针对 git，而非全局回调）。
+
 ---
 
 ## 7. 已知限制与待决策项

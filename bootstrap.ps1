@@ -69,7 +69,7 @@
     .\bootstrap.ps1 -Source Gitee
     从 Gitee 镜像下载（GitHub 访问不畅时使用）。
 .NOTES
-    Version: 1.3
+    Version: 1.4
     Compatible: Windows 7 SP1+ / PowerShell 5.0+
                 实测通过：Windows PowerShell 5.1.26100（Windows 预装版）、PowerShell 7.6.4
 #>
@@ -173,9 +173,10 @@ function Test-ZipFile {
 
 # ============================================================
 # Function: Get-RepoArchive — 下载仓库压缩包
-# 部分 Windows 环境对 GitHub 的证书吊销检查会失败（CRYPT_E_NO_REVOCATION_CHECK），
-# 这里放宽服务端证书校验以避免下载被无谓中断。下载完成后会校验内容是否为有效
-# ZIP，拒绝登录页/错误页/被拦截的响应，使"所有来源失败"能优雅回退而非在解压时崩溃。
+# 显式启用 TLS 1.2（PS 5.1 默认仅 Ssl3|Tls），但不再放宽服务端证书校验——那会破坏
+# TLS 握手（三源统一报「基础连接已经关闭」），且全局关闭证书校验有安全风险。
+# 下载完成后会校验内容是否为有效 ZIP，拒绝登录页/错误页/被拦截的响应，
+# 使"所有来源失败"能优雅回退而非在解压时崩溃。
 # ============================================================
 function Get-RepoArchive {
     param(
@@ -183,8 +184,11 @@ function Get-RepoArchive {
         [Parameter(Mandatory = $true)][string]$Destination
     )
 
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    # 显式启用 TLS 1.2（PS 5.1 默认仅 Ssl3|Tls，连不上要求 TLS1.2+ 的 CDN）。
+    # 注意：不要设置 ServerCertificateValidationCallback —— 该回调是 AppDomain 级全局副作用，
+    # 会破坏 TLS 握手（三源统一报「基础连接已经关闭: 发送时发生错误」），且全局关闭证书校验本身有安全风险。
+    # 证书校验交给 PowerShell/.NET 默认行为（与 Win11Debloat 的 Get_CN.ps1 一致，可正常下载）。
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
     Write-Log 'STEP' "正在下载：$Url"
     $progressPreference = 'SilentlyContinue'
