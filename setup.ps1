@@ -241,8 +241,37 @@ function Install-Cpolar {
     param([Parameter(Mandatory = $true)][string]$MsiPath)
 
     if (-not (Test-Path $MsiPath)) {
-        Write-Log 'ERROR' "未找到 Cpolar 安装包：$MsiPath"
-        return $false
+        Write-Log 'WARN' "未找到本地 Cpolar 安装包：$MsiPath"
+        Write-Log 'STEP' '尝试从 cpolar 官网下载安装包...'
+        $msiDir = Split-Path -Parent $MsiPath
+        if (-not (Test-Path $msiDir)) {
+            New-Item -ItemType Directory -Path $msiDir -Force | Out-Null
+        }
+        $downloadUrls = @(
+            'https://www.cpolar.com/static/downloads/cpolar-stable-windows-amd64.msi',
+            'https://www.cpolar.com/static/downloads/cpolar-windows-amd64.msi'
+        )
+        $downloaded = $false
+        foreach ($url in $downloadUrls) {
+            try {
+                Write-Log 'INFO' "尝试下载：$url"
+                $wc = New-Object System.Net.WebClient
+                $wc.Headers.Add('User-Agent', 'OpenCpolarSync-Setup')
+                $wc.DownloadFile($url, $MsiPath)
+                if ((Test-Path $MsiPath) -and ((Get-Item $MsiPath).Length -gt 100000)) {
+                    Write-Log 'OK' "下载完成（$([math]::Round((Get-Item $MsiPath).Length / 1MB, 2)) MB）"
+                    $downloaded = $true
+                    break
+                }
+            } catch {
+                Write-Log 'WARN' "下载失败：$($_.Exception.Message)"
+            }
+        }
+        if (-not $downloaded) {
+            Write-Log 'ERROR' '无法下载 Cpolar 安装包，请手动安装 Cpolar 后重试'
+            Write-Host '  下载地址：https://www.cpolar.com/download' -ForegroundColor Yellow
+            return $false
+        }
     }
 
     return (Invoke-Action -Description '静默安装 Cpolar' -Action {
