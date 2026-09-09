@@ -445,8 +445,11 @@ function Invoke-ConfigWizard {
         if ($Silent) {
             $Values.WebhookUrl = $default
         } else {
+            if ($default) {
+                Write-Host "  当前值：$default" -ForegroundColor Gray
+            }
             $prompt = '钉钉机器人 Webhook 地址'
-            if ($default) { $prompt += "（回车保留现有值）" }
+            if ($default) { $prompt += '（回车保留当前值）' }
             $input = Read-Host $prompt
             $Values.WebhookUrl = if ($input) { $input } else { $default }
         }
@@ -472,7 +475,7 @@ function Invoke-ConfigWizard {
             $Values.CpolarPassword = $default
         } else {
             if ($default) {
-                Write-Log 'INFO' '检测到已保存的 Cpolar 密码，直接回车可保留'
+                Write-Host '  当前值：已保存（输入新密码则覆盖，回车保留）' -ForegroundColor Gray
             }
             $secure = Read-Host 'Cpolar Web 登录密码' -AsSecureString
             if ($secure.Length -gt 0) {
@@ -491,7 +494,9 @@ function Invoke-ConfigWizard {
         if ($Silent) {
             $Values.OpenlistPassword = $default
         } else {
-            if ($default) { Write-Log 'INFO' '检测到已保存的 Openlist 密码，直接回车可保留' }
+            if ($default) {
+                Write-Host '  当前值：已保存（输入新密码则覆盖，回车保留）' -ForegroundColor Gray
+            }
             $secure = Read-Host 'Openlist Web 登录密码（用户名固定 admin）' -AsSecureString
             if ($secure.Length -gt 0) {
                 $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
