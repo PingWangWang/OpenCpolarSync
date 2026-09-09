@@ -14,11 +14,81 @@ OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三�
 |--------|------|--------|
 | **[Cpolar](./Cpolar/)** | 自动监控 Cpolar 在线隧道状态，变更时通过钉钉 Webhook 推送通知 | Windows Batch / PowerShell |
 | **[Openlist](./Openlist/)** | openlist（基于 Alist）文件管理服务的常驻守护、开机自启管理 | Windows Batch / PowerShell |
-| **[Watchdog](./watchdog/)** | 运行时保活看门狗，Guard 进程异常退出时自动拉起 | Windows Batch / PowerShell |
+| **[Watchdog](./Watchdog/)** | 运行时保活看门狗，Guard 进程异常退出时自动拉起 | Windows Batch / PowerShell |
+
+> **新用户请直接看 [一键部署](#-一键部署推荐)** —— 原本需要手工完成的 6 个步骤，现在一条命令即可。
 
 ---
 
-## 📦 快速导航
+## 🚀 一键部署（推荐）
+
+### 方式 A：免 clone，一条命令
+
+在 **Windows PowerShell** 中粘贴执行（无需安装 git，无需手动 clone）：
+
+```powershell
+irm https://raw.githubusercontent.com/PingWangWang/OpenCpolarSync/main/bootstrap.ps1 | iex
+```
+
+GitHub 访问不畅时，改用 Gitee 镜像：
+
+```powershell
+irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
+```
+
+### 方式 B：已 clone 仓库
+
+```powershell
+.\setup.ps1
+```
+
+### 先演练、不落盘
+
+`-DryRun` 只打印执行计划，不做任何安装 / 注册 / 写入操作：
+
+```powershell
+.\setup.ps1 -DryRun
+```
+
+### 无人值守部署
+
+全部配置通过参数传入，不弹任何交互提示：
+
+```powershell
+.\setup.ps1 -Silent `
+    -WebhookUrl 'https://oapi.dingtalk.com/robot/send?access_token=xxx' `
+    -CpolarUser 'you@example.com' `
+    -CpolarPassword 'your-password' `
+    -TunnelNames 'OpenListHC'
+```
+
+### 一键部署到底做了什么
+
+| 阶段 | 自动完成的动作 | 替代的原手工步骤 |
+|------|----------------|------------------|
+| 1 | 检测 Cpolar 客户端，未安装则静默安装仓库自带的 `cpolar_amd64.msi` | 手动安装 msi |
+| 2 | 从 `archive/openlist.zip` 自动解压 `openlist.exe` 到 `Openlist/` | 手动解压（隐含步骤） |
+| 3 | 交互式收集配置，隧道名等带默认值，直接回车即可 | 手动编辑 config.json |
+| 4 | 生成 `config.json` 并持久化到用户目录（升级不丢失） | 手动编辑 config.json |
+| 5 | 写入 `cpolar.yml` 并注册 authtoken，自动创建内网穿透隧道 | Web 端手动建隧道 |
+| 6 | 注册 Watchdog S4U 计划任务，并立即拉起两个 Guard | 手动执行 WatchdogManager |
+
+### 仍需人工的一步
+
+**Openlist 存储挂载**需要你在 Web 界面完成。脚本会自动打开 `http://localhost:5244` 并打印步骤清单。
+
+原因是 openlist 的挂载配置保存在它自己的数据库里，跨版本格式不稳定，脚本强写反而容易损坏配置，因此这里只做引导 + 端口/进程校验。
+
+### 配置文件存在哪里
+
+- **主副本**：`%LOCALAPPDATA%\OpenCpolarSync\config\config.json` —— 位于程序目录之外，重新运行 `bootstrap.ps1` 升级程序时不会被覆盖
+- **运行副本**：`Cpolar\config\config.json` —— 每次运行 `setup.ps1` 自动从主副本同步，`CpolarGuard` 与 Watchdog 无需改造即可读到最新配置
+
+---
+
+## 📦 模块详情（手动部署）
+
+一键部署已覆盖以下全部内容。若你想了解内部实现或需要单独部署某个模块，可继续阅读。
 
 ### [Cpolar 隧道状态同步 →](./Cpolar/)
 
@@ -31,7 +101,7 @@ OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三�
 - 智能去重，无变化不重复推送；配置变更热重载
 - 日志按 ISO 周轮转归档
 
-**安装方式**：编辑 `config.json` 填入 Webhook URL 和 Cpolar 登录邮箱/密码（脚本自动登录），运行 `AutoStart.bat` 设置开机自启即可。
+**手动安装方式**：参考 `Cpolar/config/config.example.json` 创建 `config.json`，填入 Webhook URL 和 Cpolar 登录邮箱/密码（脚本自动登录），运行 `AutoStart.bat` 设置开机自启即可。
 
 ### [Openlist 服务管理 →](./Openlist/)
 
@@ -41,9 +111,9 @@ OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三�
 - `AutoStart.bat` — 交互式菜单，添加/删除开机自启（UAC 提权 + shell:startup 快捷方式，支持命令行静默模式）
 - 服务默认访问地址：`http://localhost:5244`
 
-**安装方式**：下载后先解压 `archive/openlist.zip`，将 `openlist.exe` 放到 `Openlist/` 目录（与脚本同目录），详情见 [Openlist README](./Openlist/)。
+**手动安装方式**：手动解压 `archive/openlist.zip`，将 `openlist.exe` 放到 `Openlist/` 目录（与脚本同目录），详情见 [Openlist README](./Openlist/)。
 
-### [Watchdog 看门狗 →](./watchdog/)
+### [Watchdog 看门狗 →](./Watchdog/)
 
 适合所有需要 **运行时保活** 的用户。当 CpolarGuard / OpenlistGuard 的 PowerShell 进程异常退出时自动拉起，确保持续在线。
 
@@ -53,7 +123,7 @@ OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三�
 - **S4U 非交互运行** — 任务在 Session 0 执行，无控制台弹窗，注销/未登录时保活依然生效
 - **容错路径** — 支持仓库安装在带空格的目录下
 
-**安装方式**：以管理员身份运行 `watchdog\WatchdogManager.bat`，选 `1` 一键配置全部（清理旧开机自启 + 注册 S4U 计划任务）即可。
+**手动安装方式**：以管理员身份运行 `Watchdog\WatchdogManager.bat`，选 `1` 一键配置全部（清理旧开机自启 + 注册 S4U 计划任务）即可。
 
 ---
 
@@ -61,26 +131,32 @@ OpenCpolarSync 是一个面向 Windows 用户的实用工具集合，包含三�
 
 ```
 OpenCpolarSync/
-├── watchdog/                    # 运行时保活看门狗
+├── setup.ps1                   # 一键部署向导（6 阶段，支持 -DryRun / -Silent）
+├── bootstrap.ps1               # 免 clone 启动器（GitHub / Gitee / 本地三源）
+├── docs/                       # 设计文档
+│   └── OneClick-Deploy-Design.md
+├── Watchdog/                   # 运行时保活看门狗
 │   ├── GuardCheck.ps1          # 通用巡检脚本（Task Scheduler 触发）
 │   ├── WatchdogManager.bat     # 统一管理入口（安装/卸载/状态）
 │   ├── README.md               # 看门狗说明文档
-│   └── watchdog.log            # 恢复日志（自动生成）
+│   └── watchdog.log            # 恢复日志（自动生成，已忽略）
 ├── Cpolar/                     # Cpolar 隧道状态监控（守护脚本）
-│   ├── CpolarGuard.ps1         # 常驻守护脚本
+│   ├── CpolarGuard.ps1         # 常驻守护脚本（新增 -ConfigPath 参数）
 │   ├── AutoStart.bat           # 开机自启管理
 │   ├── config/                 # 配置与快照
-│   ├── logs/                   # 运行日志（自动轮转）
+│   │   ├── config.example.json # 配置模板（不含敏感信息，纳入版本控制）
+│   │   └── config.json         # 运行时生成，含明文密码，已忽略
+│   ├── logs/                   # 运行日志（自动轮转，已忽略）
 │   ├── archive/                # 旧版油猴脚本等参考文件
 │   ├── installer/              # Cpolar 安装包
 │   └── README.md
 ├── Openlist/                   # openlist 服务管理脚本
 │   ├── OpenlistGuard.ps1       # 常驻守护脚本（60秒轮询+自动重启）
 │   ├── AutoStart.bat           # 开机自启管理（添加/删除）
-│   ├── openlist.exe            # 文件管理服务程序（手动放置）
+│   ├── openlist.exe            # 文件管理服务程序（自动解压，已忽略）
 │   ├── archive/                # 发布包
-│   ├── data/                   # 配置、数据库、日志
-│   ├── logs/                   # 守护脚本日志
+│   ├── data/                   # 配置、数据库、日志（已忽略）
+│   ├── logs/                   # 守护脚本日志（已忽略）
 │   └── README.md
 ├── LICENSE                     # MIT License
 └── README.md                   # 本文件
@@ -96,9 +172,24 @@ OpenCpolarSync/
 
 ## 前置条件
 
-- **Cpolar 监控**：Windows PowerShell 5.0+，拥有 Cpolar Web 管理界面权限（`localhost:9200`），已创建钉钉机器人 Webhook，并在 `config.json` 中配置 Cpolar 登录邮箱/密码
-- **Openlist 服务**：Windows PowerShell 5.0+（守护脚本无需管理员权限；`AutoStart.bat` 自启管理需要）
-- **Watchdog 看门狗**：Windows 系统，管理员权限（用于注册计划任务）
+- **一键部署**：Windows 7 SP1+ / PowerShell 5.0+；**已在 Windows PowerShell 5.1.26100（系统预装版）与 PowerShell 7.6.4 双版本实测通过**，注册计划任务需管理员权限
+- **Cpolar 监控**：拥有 Cpolar 账号与钉钉机器人 Webhook
+- **Openlist 服务**：守护脚本无需管理员权限；`AutoStart.bat` 自启管理需要
+- **Watchdog 看门狗**：管理员权限（用于注册计划任务）
+
+## ⚠️ 注意事项
+
+1. **`config.json` 含明文密码，已从版本控制中忽略**。若你的本地仓库此前提交过该文件，需要执行以下命令才能真正生效（文件本身保留在本地）：
+
+   ```bash
+   git rm --cached Cpolar/config/config.json Cpolar/config/last-sent.json
+   ```
+
+2. **cpolar.yml 的字段写法** 是依据 `cpolar --help` 推导的，首次实机运行后请确认隧道确实建立成功。
+
+3. **升级程序不会丢失配置**：重新运行 `bootstrap.ps1` 时，配置主副本位于 `%LOCALAPPDATA%\OpenCpolarSync\config`，不在程序解压目录内。
+
+4. **脚本必须保持 UTF-8 with BOM**：Windows PowerShell 5.1 会按系统 ANSI 代码页（简体中文为 GBK）解析**无 BOM** 的 UTF-8 脚本，中文会损坏并直接导致语法错误。修改脚本时请勿丢掉 BOM。
 
 ## 🤝 贡献
 
