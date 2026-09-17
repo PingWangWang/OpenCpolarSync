@@ -359,6 +359,24 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 
 **发布新版检查清单**：改完代码 → `build_release_zip.ps1 -Tag vX.Y.Z` 本地构建 → `publish_gitee_release.ps1 -Tag vX.Y.Z` 上传（**必须成功**，脚本已改为快速失败）→ 匿名验证 `releases/latest` 能取到并下载 `OpenCpolarSync_vX.Y.Z.zip`。
 
+### 6.6 下载进度改为「底部就地刷新」（替换 Write-Progress）
+
+**现象**：用户真机部署时，下载进度条出现在控制台**顶部**，与下方滚动的日志脱节。
+
+**根因**：`Write-Progress` 在 Windows 控制台里固定绘制在**屏幕顶部**的一块保留区域（与光标位置无关），并没有「显示到底部」的选项——这是它在 PowerShell 里的固有实现，改参数解决不了。
+
+**修复**：`bootstrap-core.ps1` 移除 `Write-Progress`，改为三个小工具函数，在**当前输出位置**就地刷新一行：
+
+- `Write-ProgressLine` — `Write-Host ("`r" + $Text + $pad) -NoNewline`：用 `\r` 回到行首覆盖重写；`$pad` 用空格补齐「上一次更长」的内容，避免残留旧字符。
+- `Complete-ProgressLine` — `Write-Host ''` 换行收尾，保证后续日志从新行开始、不被进度覆盖。
+- `Test-ProgressEnabled` — 用 `[Console]::IsOutputRedirected` 探测；**输出被重定向（如写日志文件）时不绘制**，避免把回车控制符写进日志；宿主不支持该属性时静默降级为不显示。
+
+由于写入点是「当前光标处」，进度自然落在最新一行（**底部**），与日志顺序一致。
+
+附带改进：约 **100 ms 限流重绘**（避免高速下载刷屏）、显示「已下载 / 总量 MB + 百分比 + MB/s」、**只有真正下完才补画 100%**（中途失败不误报完成）。
+
+**验证**：用真实 `Invoke-WebDownload` 抓取进度帧，确认为同一行内的 `\r` 覆盖刷新且带空格补齐（`<CR>…13%…<CR>…100% 完成␠␠␠␠␠␠`）；真实链路 `bootstrap-core.ps1 -NoSetup` 端到端仍 `SCRIPT_RC=0`（下载 75.25 MB + 解压 26 文件）。
+
 
 ---
 
