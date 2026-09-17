@@ -670,10 +670,15 @@ try {
     } else {
         Write-Host '   配置文件    未找到'
     }
-    $ol = Get-Process openlist -ErrorAction SilentlyContinue
-    $cp = Get-Process cpolar   -ErrorAction SilentlyContinue
-    Write-Host ("   Openlist    " + $(if ($ol) { '运行中（PID=' + $ol[0].Id + '）' } else { '未运行' }))
-    Write-Host ("   Cpolar      " + $(if ($cp) { '运行中（PID=' + $cp[0].Id + '）' } else { '未运行' }))
+    $ol = @(Get-Process openlist -ErrorAction SilentlyContinue)
+    $cp = @(Get-Process cpolar   -ErrorAction SilentlyContinue)
+    # 不用干巴巴的「未运行」：openlist.exe 由 Watchdog 计划任务（注册后 1 分钟内首次
+    # 运行）拉起，若此刻还没起来，说明的是「时间没到」而不是「部署失败」。
+    Write-Host ("   Openlist    " + $(if ($ol.Count -gt 0) { '运行中（PID=' + $ol[0].Id + '）' } else { '尚未就绪（由 Watchdog 拉起，通常 1 分钟内可用）' }))
+    Write-Host ("   Cpolar      " + $(if ($cp.Count -gt 0) { '运行中（PID=' + $cp[0].Id + '）' } else { '尚未运行（启动 cpolar 客户端或等 Watchdog 拉起后可用）' }))
+    if ($ol.Count -eq 0) {
+        Write-Host ("   排查日志    " + (Join-Path $appDir 'Openlist\logs\guard.log'))
+    }
     Write-Rule -Width 58 -Style Double
     Write-Host '   提示：配置保存在上面的「配置目录」，升级不会丢失；重新运行本向导可修改设置。' -ForegroundColor DarkGray
 } catch {

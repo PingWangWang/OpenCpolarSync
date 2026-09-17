@@ -123,6 +123,7 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 | `-SkipOpenlist` | 跳过 openlist 部署 |
 | `-SkipTunnel` | 跳过 Cpolar 隧道配置 |
 | `-SkipWatchdog` | 跳过 Watchdog 计划任务注册 |
+| `-OpenlistReadyTimeout <秒>` | 注册 Watchdog 后等待 Openlist 就绪的最长秒数，默认 30 |
 | `-SkipShortcut` | 跳过在桌面创建「配置向导」快捷方式 |
 | `-NoMenu` | 不问「安装 / 卸载」，直接进入安装流程（由 `bootstrap-core.ps1` 自动传入，避免重复询问） |
 | `-NoBrowser` | 不自动打开 Openlist / Cpolar 网页 |
@@ -153,8 +154,14 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 | 3 | 交互式收集配置（Webhook、邮箱、密码、隧道名等，**当前值会回显**） |
 | 4 | 生成 config.json 并持久化到用户目录（升级不丢失） |
 | 5 | 写入 cpolar.yml 隧道配置 |
-| 6 | 注册 Watchdog S4U 计划任务，拉起两个守护进程 |
+| 6 | 注册 Watchdog S4U 计划任务 → **立即触发一次**，由 Guard 拉起两个守护进程 → 等待 Openlist 就绪（≤ `-OpenlistReadyTimeout` 秒） |
 | 7 | 在桌面创建「OpenCpolarSync 配置向导」快捷方式（以管理员身份运行） |
+| 收尾 | 打开 Openlist / Cpolar 网页（**只打开端口确实已在监听的页面**），并输出部署结果摘要 |
+
+> 阶段 6 为什么要「立即触发 + 等待就绪」：注册计划任务只是**排期**，`WatchdogManager.bat` 用的触发器是
+> 注册后 **1 分钟**才首次运行。若不等这一下，收尾摘要会显示 `Openlist 未运行`，自动打开的 5244 也会是空白页。
+> 等待超时**不算部署失败**——Guard 会在后续轮询周期继续重试，只是收尾不再打开页面并提示看
+> `Openlist\logs\guard.log`。
 
 > 阶段 7 的快捷方式是后续**改配置 / 卸载的入口**：双击即可重新运行本向导（会载入现有配置作为默认值），
 > 向导启动后可选择「安装 / 更新」或「卸载」。
@@ -162,7 +169,8 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 
 > 🖥️ 部署收尾会自动打开 **Openlist**（`http://localhost:5244`）与 **Cpolar Web**（`http://localhost:9200`）
 > 两个页面：前者用于完成存储挂载，后者用于确认隧道是否在线。
-> 不想自动打开可加 `-NoBrowser`。
+> 只会打开**端口确实已在监听**的页面——进程刚起时端口还没开始听，硬开只会得到一个空白页；
+> 没就绪的那个会给出提示而不是打开。不想自动打开可加 `-NoBrowser`。
 
 > ℹ️ 首次配置时「要监控的隧道名」默认为**空**，不会预填任何隧道名——此时会跳过 cpolar.yml 写入。
 > 需要监控时，重新双击向导补填，或直接修改配置文件里的 `selectedTunnelNames`（运行中改动会自动生效）。
@@ -302,6 +310,24 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 如果检查结果里 Cpolar / Openlist 显示 **≥2 个实例**，说明或是旧版本遗留的进程，或是该程序
 自身启动了多份。向导此时只告警并给建议，**不会替你结束第三方进程**——确认后可在「任务管理器」
 里保留一个、结束其余，再重新运行向导即可。
+
+### Q: 首次部署完成后 `Openlist` 显示「未运行」，5244 也打不开？
+
+先确认是不是**时间没到**。`openlist.exe` 不是向导直接启动的，而是由 `OpenlistGuard` 启动，
+而 Guard 由 Watchdog 计划任务拉起。
+
+- **v1.1.15 起（当前版本）**：向导在阶段 6 注册完计划任务后会**立刻触发一次**并等待 Openlist
+  就绪（默认最多 30 秒）；一般收尾时摘要里就是「运行中（PID=…）」，页面也会正常打开。
+- 若摘要显示「尚未就绪」，说明等待超时了。它**不是部署失败**——Guard 会在后续轮询周期继续重试，
+  通常 1 分钟内起来。等一会儿再刷新 http://localhost:5244 即可。
+- 若**一直**起不来，看这两个日志：
+  - `%LOCALAPPDATA%\OpenCpolarSync\app\Openlist\logs\guard.log` —— 里面 `openlist.exe started. PID=…`
+    说明启动成功；`openlist.exe not found at:` 说明解压没做成功；`started` 之后紧跟 `not found`
+    说明进程起来后立刻退出了。
+  - `%LOCALAPPDATA%\OpenCpolarSync\app\Watchdog\watchdog.log` —— 每次计划任务 tick 与 Guard 重启记录。
+
+> 顺带一提：`Cpolar` 显示「运行中」不代表是向导启动的——cpolar 是自带常驻的客户端，通常在跑向导之前
+> 就已经在运行了，因此它和 Openlist 的启动时机不可比。
 
 ---
 

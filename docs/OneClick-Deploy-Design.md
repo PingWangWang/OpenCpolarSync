@@ -144,24 +144,33 @@ setup.ps1（核心向导）
 | 函数 | 职责 |
 |------|------|
 | `Write-Log` / `Write-Stage` | 分级着色日志与阶段标题 |
+| `Write-Banner` / `Write-Rule` | 横幅与横向分隔线（字符限定在 GB2312 内） |
 | `Invoke-Action` | 副作用统一包装，DryRun 下只打印不执行 |
 | `Get-SpecialFolder` | 安全获取系统目录（环境变量缺失时回退 .NET API） |
 | `Test-IsAdmin` | 管理员权限判断 |
 | `Test-CpolarInstalled` | 注册表 / 路径 / 进程三重检测 |
 | `Install-Cpolar` | msiexec 静默安装 |
 | `Deploy-Openlist` | 解压并部署 openlist.exe（幂等） |
-| `Set-CpolarTunnel` | 生成 cpolar.yml 并注册 authtoken |
+| `Set-OpenlistAdminPassword` | 写入 openlist 的 admin 登录密码 |
+| `Set-CpolarTunnel` | 生成 cpolar.yml 并注册 authtoken（cpolar 已在运行时跳过 CLI） |
 | `Read-ExistingConfig` | 读取历史配置作为默认值 |
 | `Invoke-ConfigWizard` | 交互式配置收集 |
 | `New-GuardConfigFile` | 生成 config.json（手工拼 JSON 保中文可读） |
+| `Get-ProcessList` / `Get-ToolProcesses` | 进程枚举；后者按「`-File` + Guard 完整路径」精确识别本工具的 Guard |
+| `Select-DuplicateProcess` / `Write-ProcessStatus` | Guard 去重与运行状态三档输出 |
+| `Test-TcpPort` / `Wait-ServiceReady` | 端口连通性探测与服务就绪等待（见 6.10） |
 | `Register-WatchdogTasks` | 注册计划任务 |
-| `Show-FinalChecklist` | 收尾引导与人工清单 |
+| `Start-WatchdogTicks` | 注册后立即 `schtasks /Run` 触发一次（见 6.10） |
+| `New-DesktopShortcut` | 创建带提权标志（`.lnk` 偏移 `0x15` 的 bit5）的桌面快捷方式 |
+| `Show-FinalChecklist` | 收尾引导与人工清单（按端口实测决定打开哪个页面） |
 
 ### 4.4 参数设计
 
 无人值守所需参数全部支持：`-WebhookUrl` `-CpolarUser` `-CpolarPassword` `-TunnelNames` `-Interval` `-AuthToken` `-Region` `-OpenlistPort`。
 
-控制类：`-Silent`（非交互）`-DryRun`（演练）`-SkipCpolarInstall` `-SkipOpenlist` `-SkipTunnel` `-SkipWatchdog` `-NoBrowser` `-NoElevate`。
+控制类：`-Silent`（非交互）`-DryRun`（演练）`-SkipCpolarInstall` `-SkipOpenlist` `-SkipTunnel` `-SkipWatchdog` `-SkipShortcut` `-NoBrowser` `-NoElevate` `-NoMenu`。
+
+时序类：`-OpenlistReadyTimeout`（默认 30 秒，注册 Watchdog 后等待 Openlist 就绪的上限）。
 
 ### 4.5 文件清单
 
@@ -582,6 +591,96 @@ Guard 是本工具自己的进程，同名出现 2 个一定是错误 → 自动
 | 真实执行（Silent + 全跳过） | `REAL_OK`，预检与收尾均正常 |
 
 > ⚠️ 未验证项：**「检测到重复后实际结束进程」这一条在沙箱内无法端到端执行**——沙箱拦截了 `Start-Process`（PowerShell 与 Bash 两条路径都拦），无法造出两个真实的 Guard 进程。该分支的逻辑（分组、挑多余、`Stop-Process`）已通过函数级单测覆盖，`Stop-Process` 本身是标准 cmdlet。真机首次运行时可留意预检段是否出现 `已结束多余的 Guard 进程 …`。
+
+---
+
+### 6.10 首次部署收尾「Openlist 未运行」的真实根因与修复
+
+#### 现象
+
+真机（用户名 `Slyou`）首次部署的尾部日志：
+
+```
+阶段 7/7  ·  桌面快捷方式
+√ 已在桌面创建快捷方式：OpenCpolarSync 配置向导
+...
+→ 正在打开 Openlist 与 Cpolar 网页...
+...
+部署结果摘要
+Openlist    未运行
+Cpolar      运行中（PID=6396）
+```
+
+用户据此提问「为什么首次配置完成后，openlist 是未运行」，并怀疑部署失败。
+
+#### 根因：这是时序问题，不是安装失败
+
+启动 openlist.exe 的**唯一**路径是 `OpenlistGuard.ps1` → 而 Guard 由 `GuardCheck.ps1` 拉起 →
+而 `GuardCheck.ps1` 由 Watchdog 计划任务触发。逐环节核对代码后确认：**整个 setup 流程没有任何一处
+会启动 openlist.exe**（`setup.ps1` 只在 `Get-ToolProcesses` 里*枚举* Guard 脚本路径用于去重）。
+
+| 环节 | 位置 | 事实 |
+|---|---|---|
+| 注册计划任务 | `setup.ps1` `Register-WatchdogTasks` | 只执行 `WatchdogManager.bat setup all`，不拉起任何 Guard |
+| `:setup all` | `WatchdogManager.bat` | 只做「移除旧开机自启 + 注册 2 个任务」，不启动 |
+| **任务触发器** | `WatchdogManager.bat` `:register_task` | `-Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval 5min` → **首次运行在注册后 1 分钟** |
+| 唯一的 Guard 启动者 | `GuardCheck.ps1` | Mutex 判定 Guard 不在 → `Start-Process -File <Guard.ps1>` |
+| 真正启动 openlist | `OpenlistGuard.ps1` | `Start-Process openlist.exe server` + `Start-Sleep 15` 启动窗口 |
+| 打印摘要 | `bootstrap-core.ps1` | setup 返回后立刻 `Get-Process openlist` 采样 → 必然「未运行」 |
+| 打开网页 | `setup.ps1` `Show-FinalChecklist` | 在 openlist 启动**之前**就打开了 5244 → 首次安装必然空白页 |
+
+两个附带结论：
+
+1. `setup.ps1` 文档头原先写的「注册 Watchdog 计划任务（S4U）**并立即拉起** Cpolar / Openlist 两个 Guard」
+   与实现不符——**注释是错的**（本次一并订正）。
+2. `Cpolar 运行中` 不是向导启动的（本轮阶段 5 因隧道为空被跳过，`Set-CpolarTunnel` 未执行；
+   `CpolarGuard.ps1` 也只轮询 API 不启动进程）→ 说明 cpolar 客户端在跑向导**之前**就已经在运行。
+   两者不可比：openlist.exe 完全依赖 Guard 启动，cpolar 是自带常驻的客户端。
+
+#### 影响面
+
+| # | 缺陷 | 说明 |
+|---|---|---|
+| 1 | 首次安装有 **约 60 秒空窗** | 期间没有任何组件会启动 openlist.exe，5244 不可用 |
+| 2 | **收尾自动打开的 5244 必然是空白页** | 对首次用户最直观的坏体验 |
+| 3 | 摘要只写「未运行」 | 无原因说明，误导用户以为部署失败（本次提问的直接起因） |
+
+#### 修复（三处，`setup.ps1` + `bootstrap-core.ps1`）
+
+1. **注册后立即触发一次计划任务**：新增 `Start-WatchdogTicks`，对
+   `$WatchdogTaskNames`（两个任务名，与 `WatchdogManager.bat` 中的常量一致）逐个执行
+   `schtasks.exe /Run /TN <name>`。走的是 `GuardCheck.ps1` **同一条代码路径**
+   （Mutex + 进程双重去重），因此**不会**重复拉起 Guard；触发失败只告警不阻断
+   （任务仍会在 1 分钟后自行运行）。
+2. **等待 Openlist 就绪**：新增 `Test-TcpPort`（用 .NET `BeginConnect` 控制超时，不依赖
+   `Add-Type`）与 `Wait-ServiceReady`（轮询「进程存在**且**端口已监听」，有绝对值上限，
+   `TimeoutSec=0` 表示只探测一次）。在阶段 6 触发任务后调用，超时不视为失败，
+   只提示并给出 `Openlist\logs\guard.log` 路径。新增参数 `-OpenlistReadyTimeout`（默认 30 秒）。
+   动态省略号只在**非重定向**输出下绘制（`[Console]::IsOutputRedirected`），避免把 `\r` 写进日志。
+3. **只在端口真的在监听时才打开页面**：`Show-FinalChecklist` 打开页面前先 `Test-TcpPort`
+   实测 5244 / 9200，未监听的只给提示不打开，避免空白页；未就绪时额外输出一段
+   「注意：Openlist 服务尚未就绪（由 Watchdog 拉起，稍等刷新）」而不是让人以为失败。
+   `bootstrap-core.ps1` 的摘要文案同步改为「尚未就绪（由 Watchdog 拉起，通常 1 分钟内可用）」
+   并附排查日志路径。
+
+#### 验证
+
+| 项 | 结果 |
+|---|---|
+| AST 语法解析 | 仓库内 9 个 `.ps1` 全部 OK |
+| `Test-TcpPort` 未监听端口(5244) | `False`，耗时 847 ms（受 `TimeoutMs` 限制，不会挂住） |
+| `Test-TcpPort` 本机 RPC(135) | `True`，耗时 2 ms |
+| `Wait-ServiceReady` 进程已存在（explorer） | `True`，23 ms（立即返回，不等满超时） |
+| `Wait-ServiceReady` 进程不存在 | `False`，2049 ms（与 `TimeoutSec=2` 吻合） |
+| `Wait-ServiceReady` 进程在但端口未听 | `False`，2648 ms（上限受控） |
+| `Wait-ServiceReady -TimeoutSec 0` | `False`，5 ms（非阻塞探测用） |
+| DryRun 全流程 | 新增两行 `~ 计划立即触发 Watchdog 计划任务…` / `~ 计划等待 Openlist 就绪…`，七阶段无异常 |
+| 真实执行（Silent + 全跳过 + 临时 ConfigDir） | 356 ms 正常结束，收尾正确输出「注意：Openlist 服务尚未就绪」+ 日志路径 |
+
+> ⚠️ 未验证项：**阶段 6 的真实路径（真正注册并触发计划任务）在沙箱内无法执行**——注册计划任务需要
+> 管理员权限且会改动本机，`Start-Process` 也被沙箱拦截。该路径的每个部件（`schtasks /Run` 语法、
+> 两个任务名与 bat 的一致性、等待函数）均已单独核验，真机首次部署时可留意阶段 6 是否依次出现
+> `已触发计划任务：…` 与 `Openlist 已就绪：http://localhost:5244（PID=…）`。
 
 
 ---

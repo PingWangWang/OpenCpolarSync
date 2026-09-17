@@ -7,9 +7,11 @@
       2. 从 archive/openlist.zip 解压 openlist.exe 到 Openlist/ 目录
       3. 交互式收集配置并生成 config.json（持久化到用户目录，升级不丢失）
       4. 配置 Cpolar 内网穿透隧道（写入 cpolar.yml 并注册 authtoken）
-      5. 注册 Watchdog 计划任务（S4U）并立即拉起 Cpolar / Openlist 两个 Guard
+      5. 注册 Watchdog 计划任务（S4U）并立即触发一次，由 GuardCheck 拉起
+         Cpolar / Openlist 两个 Guard，再等 Openlist 就绪（有上限）后才继续
       6. 在桌面创建「配置向导」快捷方式（以管理员身份运行）——以后双击即可重开本向导
       7. 自动打开 Openlist Web 与 Cpolar Web 两个页面（前者用于完成存储挂载）
+         ——只打开「端口确实已在监听」的页面，避免首次部署打开一个空白页
 
     独立运行（如双击桌面快捷方式）时会先询问操作类型：
       1) 安装 / 更新   2) 卸载
@@ -44,6 +46,9 @@
     Cpolar 隧道区域，默认 cn。
 .PARAMETER OpenlistPort
     Openlist 服务端口，默认 5244。
+.PARAMETER OpenlistReadyTimeout
+    注册 Watchdog 后等待 Openlist 就绪的最长秒数，默认 30。超时不视为失败，
+    Guard 会在后续轮询周期继续重试；该值只影响收尾摘要与自动打开页面的时机。
 .PARAMETER SkipCpolarInstall
     跳过 Cpolar 安装检测与安装。
 .PARAMETER SkipOpenlist
@@ -96,6 +101,7 @@ param(
     [string]$AuthToken,
     [string]$Region = 'cn',
     [int]$OpenlistPort = 5244,
+    [int]$OpenlistReadyTimeout = 30,
 
     [switch]$SkipCpolarInstall,
     [switch]$SkipOpenlist,
@@ -361,6 +367,82 @@ function Write-ProcessStatus {
         Write-Log 'OK' "$Label：运行中（PID=$pids）"
     } else {
         Write-Log 'WARN' "$Label：检测到 $($list.Count) 个实例（PID=$pids），可能存在重复拉起"
+    }
+}
+
+# ============================================================
+# Function: Test-TcpPort — 探测本机 TCP 端口是否已在监听
+#
+# 为什么不能只看「进程存在」：openlist.exe 进程刚起来时端口往往还没开始监听，
+# 此刻打开浏览器只会得到一个空白页。收尾要打开 Web 页面，就得先确认真在听。
+# 不依赖 Add-Type（受限环境会拦），直接用 .NET BeginConnect 控制超时。
+# ============================================================
+function Test-TcpPort {
+    param(
+        [string]$ComputerName = '127.0.0.1',
+        [Parameter(Mandatory = $true)][int]$Port,
+        [int]$TimeoutMs = 800
+    )
+
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $iar = $client.BeginConnect($ComputerName, $Port, $null, $null)
+        if (-not $iar.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) { return $false }
+        return $client.Connected
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
+    }
+}
+
+# ============================================================
+# Function: Wait-ServiceReady — 等待服务「进程存在且端口已监听」
+#
+# 为什么需要它：openlist.exe 不是 setup.ps1 启动的，而是由 OpenlistGuard 启动，
+# 而 Guard 由 Watchdog 计划任务拉起；注册任务的那一刻 openlist 还没起来。
+# 若此时就打印摘要 / 打开网页，首次部署必然得到「Openlist 未运行」+ 一个空白页。
+# 所以在触发计划任务后留一个有上限的等待窗口（TimeoutSec，0 表示只探测一次）。
+#
+# 返回 $true = 已就绪；$false = 超时（调用方应给提示而不是当成部署失败）。
+# ============================================================
+function Wait-ServiceReady {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProcessName,
+        [int]$Port = 0,
+        [int]$TimeoutSec = 30,
+        [string]$Label = ''
+    )
+
+    if (-not $Label) { $Label = $ProcessName }
+
+    # 输出被重定向（写日志）或宿主没有控制台时不画动态省略号，
+    # 避免把回车控制符写进日志文件。
+    $canDraw = $false
+    try { $canDraw = -not [Console]::IsOutputRedirected } catch { $canDraw = $false }
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $frame = 0
+    $frames = @('.  ', '.. ', '...')
+
+    while ($true) {
+        $ready = $false
+        if (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue) {
+            # 只要进程不要端口时（Port<=0）进程存在即视为就绪
+            if ($Port -le 0 -or (Test-TcpPort -Port $Port)) { $ready = $true }
+        }
+
+        if ($ready -or (Get-Date) -ge $deadline) {
+            # 抹掉等待中的省略号那一行
+            if ($canDraw -and $frame -gt 0) { Write-Host ("`r" + (' ' * 44) + "`r") -NoNewline }
+            return $ready
+        }
+
+        if ($canDraw) {
+            Write-Host ("`r   等待 $Label 就绪" + $frames[$frame % 3]) -NoNewline
+            $frame++
+        }
+        Start-Sleep -Milliseconds 1000
     }
 }
 
@@ -881,6 +963,53 @@ function Register-WatchdogTasks {
     return $ok
 }
 
+# Watchdog 计划任务名 —— 必须与 Watchdog/WatchdogManager.bat 里的
+# TASK_CPOLAR / TASK_OPENLIST 保持一致（该 bat 是任务名的唯一定义处）。
+$WatchdogTaskNames = @(
+    'OpenCpolarSync_CpolarGuard_Watchdog',
+    'OpenCpolarSync_OpenlistGuard_Watchdog'
+)
+
+# ============================================================
+# Function: Start-WatchdogTicks — 立即触发一次 Watchdog 计划任务
+#
+# 为什么必须做：注册计划任务只是「排期」，并不会立刻运行。WatchdogManager.bat
+# 用的触发器是 `-Once -At ((Get-Date).AddMinutes(1))`，也就是注册后 **1 分钟**
+# 才第一次运行；而在这 1 分钟里没有任何组件会启动 openlist.exe —— 这正是
+# 「首次部署收尾显示 Openlist 未运行、并自动打开一个空白页」的根本原因。
+#
+# 这里用 schtasks /Run 立刻触发，走的是 GuardCheck.ps1 同一条代码路径
+# （Mutex + 进程双重去重），因此不会重复拉起 Guard。
+# 触发失败不阻断部署：任务仍会按触发器在 1 分钟后自行运行。
+# ============================================================
+function Start-WatchdogTicks {
+    if ($DryRun) {
+        Write-Log 'DRYRUN' ("计划立即触发 Watchdog 计划任务：" + ($WatchdogTaskNames -join '、'))
+        return $true
+    }
+
+    $allOk = $true
+    foreach ($name in $WatchdogTaskNames) {
+        $exit = 1
+        try {
+            $p = Start-Process -FilePath 'schtasks.exe' `
+                -ArgumentList "/Run /TN `"$name`"" `
+                -Wait -PassThru -WindowStyle Hidden
+            $exit = $p.ExitCode
+        } catch {
+            $exit = 1
+        }
+
+        if ($exit -eq 0) {
+            Write-Log 'OK' "已触发计划任务：$name"
+        } else {
+            Write-Log 'WARN' "触发计划任务失败（exit=$exit）：$name，将在 1 分钟后由计划任务自行运行"
+            $allOk = $false
+        }
+    }
+    return $allOk
+}
+
 # ============================================================
 # Function: New-DesktopShortcut — 在桌面创建「配置向导」快捷方式
 # 部署完成后在桌面放一个快捷方式，用户以后双击即可重新打开本向导，
@@ -952,7 +1081,13 @@ function Show-FinalChecklist {
         [Parameter(Mandatory = $true)][int]$Port,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Tunnels,
         [Parameter(Mandatory = $true)][string]$PrimaryConfigPath,
-        [int]$CpolarWebPort = 9200
+        [int]$CpolarWebPort = 9200,
+        # 阶段 6 等待后的真实结果；仅用于文案，不决定是否打开页面（页面按端口实测）
+        [bool]$OpenlistReady = $false,
+        # Openlist 的日志目录，用于未就绪时给出可排查的位置
+        [string]$OpenlistLogHint = '',
+        # 用户显式跳过了 Openlist 部署：此时不该因「服务没起来」告警
+        [switch]$SkipOpenlist
     )
 
     $openlistUrl = "http://localhost:$Port"
@@ -977,6 +1112,15 @@ function Show-FinalChecklist {
         Write-Host '        补上隧道名，或重新运行本向导即可' -ForegroundColor DarkGray
     }
     Write-Host ''
+    if (-not $OpenlistReady -and -not $DryRun -and -not $SkipOpenlist) {
+        # 别让用户以为部署失败了：Openlist 未就绪只是「还没轮到它起来」。
+        Write-Host '   注意：Openlist 服务尚未就绪' -ForegroundColor Yellow
+        Write-Host '      它由 Watchdog 计划任务拉起（注册后 1 分钟内首次运行），稍等片刻刷新即可。' -ForegroundColor DarkGray
+        if ($OpenlistLogHint) {
+            Write-Host ("      若一直起不来，查看日志：" + $OpenlistLogHint) -ForegroundColor DarkGray
+        }
+        Write-Host ''
+    }
     # 只有快捷方式确实存在时才提示，避免 -SkipShortcut / 创建失败时误导用户
     $scPath = Join-Path (Get-SpecialFolder -VariableName 'Desktop' -FolderName 'Desktop') 'OpenCpolarSync 配置向导.lnk'
     if (Test-Path $scPath) {
@@ -987,17 +1131,43 @@ function Show-FinalChecklist {
     Write-Host ("   配置文件：$PrimaryConfigPath") -ForegroundColor DarkGray
     Write-Host '   后续修改配置无需重装，Guard 会在下一个轮询周期自动热加载。' -ForegroundColor DarkGray
 
-    if ($NoBrowser -or $DryRun) {
+    if ($NoBrowser) {
+        Write-Log 'INFO' "已指定 -NoBrowser，跳过打开浏览器：Openlist $openlistUrl ；Cpolar $cpolarUrl"
+        return
+    }
+    if ($DryRun) {
         Write-Log 'DRYRUN' "计划打开浏览器：Openlist $openlistUrl ；Cpolar $cpolarUrl"
         return
     }
 
     # Openlist 与 Cpolar 两个页面都拉起：前者用于完成存储挂载，后者用于确认隧道在线。
+    # 但只打开「端口确实已在监听」的那个 —— 进程刚起时端口还没听，硬开只会得到空白页
+    # （首次部署时 Openlist 尚未就绪，就是这种情况）。
     Write-Log 'STEP' '正在打开 Openlist 与 Cpolar 网页...'
-    Start-Process $openlistUrl -ErrorAction SilentlyContinue
+    $opened = 0
+
+    if ($SkipOpenlist) {
+        Write-Log 'INFO' "已指定 -SkipOpenlist，跳过打开 $openlistUrl"
+    } elseif (Test-TcpPort -Port $Port) {
+        Start-Process $openlistUrl -ErrorAction SilentlyContinue
+        $opened++
+    } else {
+        Write-Log 'WARN' "Openlist 端口 $Port 尚未监听，暂不打开页面；服务起来后访问 $openlistUrl"
+    }
+
     # 稍作停顿，避免两个地址在同一瞬间抢夺默认浏览器实例导致只打开一个
     Start-Sleep -Milliseconds 400
-    Start-Process $cpolarUrl -ErrorAction SilentlyContinue
+
+    if (Test-TcpPort -Port $CpolarWebPort) {
+        Start-Process $cpolarUrl -ErrorAction SilentlyContinue
+        $opened++
+    } else {
+        Write-Log 'WARN' "Cpolar 端口 $CpolarWebPort 尚未监听，暂不打开页面；服务起来后访问 $cpolarUrl"
+    }
+
+    if ($opened -eq 0) {
+        Write-Log 'INFO' '两个页面都还没就绪；稍后按上面的地址手动访问即可'
+    }
 }
 
 # ============================================================
@@ -1223,10 +1393,40 @@ if ($SkipTunnel) {
 
 # --- 阶段 6：Watchdog 注册 ------------------------------------
 Write-Stage -Number 6 -Title '守护与自启'
+# 收尾判断用：Openlist 此刻是否真的可用（不是「有没有配置」，是「起来没有」）
+$openlistReady = $false
+
 if ($SkipWatchdog) {
     Write-Log 'INFO' '已指定 -SkipWatchdog，跳过计划任务注册'
+    # 服务可能在本轮之前就已经在跑：这里只做一次非阻塞探测，供收尾判断用
+    if (-not $SkipOpenlist) {
+        $openlistReady = Wait-ServiceReady -ProcessName 'openlist' -Port $OpenlistPort -TimeoutSec 0
+    }
 } else {
-    [void](Register-WatchdogTasks -ManagerPath $managerPath)
+    $registered = Register-WatchdogTasks -ManagerPath $managerPath
+    if ($registered) {
+        # 注册只是排期（触发器为「+1 分钟」），必须立刻触发一次，否则 openlist.exe
+        # 要等到 1 分钟后才由 Guard 拉起 —— 见 Start-WatchdogTicks 的说明。
+        [void](Start-WatchdogTicks)
+
+        if ($DryRun) {
+            Write-Log 'DRYRUN' "计划等待 Openlist 就绪（最多 $OpenlistReadyTimeout 秒）后再输出收尾引导"
+        } elseif ($SkipOpenlist) {
+            Write-Log 'INFO' '已指定 -SkipOpenlist，跳过等待 Openlist 就绪'
+        } else {
+            Write-Log 'STEP' "等待 Openlist 就绪（最多 $OpenlistReadyTimeout 秒）..."
+            if (Wait-ServiceReady -ProcessName 'openlist' -Port $OpenlistPort `
+                    -TimeoutSec $OpenlistReadyTimeout -Label 'Openlist') {
+                $olProcs = @(Get-ProcessList -Name 'openlist')
+                $olPids = ($olProcs | ForEach-Object { $_.Id }) -join ', '
+                Write-Log 'OK' "Openlist 已就绪：http://localhost:$OpenlistPort（PID=$olPids）"
+                $openlistReady = $true
+            } else {
+                Write-Log 'WARN' '等待超时：Openlist 尚未就绪，Guard 会在后续轮询周期自动重试'
+                Write-Log 'INFO' "排查日志：$(Join-Path $openlistDir 'logs\guard.log')"
+            }
+        }
+    }
 }
 
 # --- 阶段 7：桌面快捷方式 --------------------------------------
@@ -1243,7 +1443,7 @@ if ($SkipShortcut) {
 }
 
 # --- 收尾引导 -------------------------------------------------
-Show-FinalChecklist -Port $OpenlistPort -Tunnels $values.TunnelNames -PrimaryConfigPath $primaryConfig -CpolarWebPort 9200
+Show-FinalChecklist -Port $OpenlistPort -Tunnels $values.TunnelNames -PrimaryConfigPath $primaryConfig -CpolarWebPort 9200 -OpenlistReady $openlistReady -OpenlistLogHint (Join-Path $openlistDir 'logs\guard.log') -SkipOpenlist:$SkipOpenlist
 
 Write-Host ''
 Write-Rule -Width 58 -Style Double
