@@ -224,7 +224,7 @@ function Invoke-WebDownload {
 # ============================================================
 # Function: Get-RepoArchive — 下载仓库压缩包
 # 显式启用 TLS 1.2（PS 5.1 默认仅 Ssl3|Tls），但不再放宽服务端证书校验——那会破坏
-# TLS 握手（三源统一报「基础连接已经关闭」），且全局关闭证书校验有安全风险。
+# TLS 握手（各源统一报「基础连接已经关闭」），且全局关闭证书校验有安全风险。
 # 下载完成后会校验内容是否为有效 ZIP，拒绝登录页/错误页/被拦截的响应，
 # 使"所有来源失败"能优雅回退而非在解压时崩溃。
 # ============================================================
@@ -236,14 +236,14 @@ function Get-RepoArchive {
 
     # 显式启用 TLS 1.2（PS 5.1 默认仅 Ssl3|Tls，连不上要求 TLS1.2+ 的 CDN）。
     # 注意：不要设置 ServerCertificateValidationCallback —— 该回调是 AppDomain 级全局副作用，
-    # 会破坏 TLS 握手（三源统一报「基础连接已经关闭: 发送时发生错误」），且全局关闭证书校验本身有安全风险。
+    # 会破坏 TLS 握手（各源统一报「基础连接已经关闭: 发送时发生错误」），且全局关闭证书校验本身有安全风险。
     # 证书校验交给 PowerShell/.NET 默认行为（与 Win11Debloat 的 Get_CN.ps1 一致，可正常下载）。
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
     Write-Log 'STEP' "正在下载：$Url"
 
     # 函数级保护：下载/校验任何环节失败都清理临时文件并把异常抛给外层回退逻辑。
-    # 超时 45 秒，避免 Gitee 镜像在部分网络下长时间无响应导致用户以为卡死。
+    # 超时 45 秒，避免 Gitee 源在部分网络下长时间无响应导致用户以为卡死。
     try {
         Invoke-WebDownload -Url $Url -Destination $Destination -Name "下载 ($Url)"
 

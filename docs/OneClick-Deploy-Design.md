@@ -56,7 +56,7 @@
 | 做法 | 说明 | 借鉴点 |
 |------|------|--------|
 | `param` 开关化 | 近百个 `[switch]` / `[string]` 参数 | 支持静默与无人值守 |
-| 自动获取最新版 | 调 GitHub API 取 release zipball | 免 clone |
+| 自动获取最新版 | 调 Gitee API 取 release zipball | 免 clone |
 | 解压到临时目录 | `%TEMP%\Win11Debloat` | 与仓库解耦 |
 | **配置目录保护** | 清理时排除 `Config/Logs/Backups` | **升级不丢配置** |
 | 参数透传 | 重建参数列表传给主脚本 | 入口与逻辑分离 |
@@ -228,7 +228,7 @@ diff 仅 20 增 2 删，未触碰任何业务逻辑；不传参时行为与原�
 | T6 辅助函数 | 2/2 PASS |
 | T7 解压逻辑（模拟压缩包带子目录） | 2/2 PASS（含幂等） |
 | T8 隧道 yml 生成 | 4/4 PASS |
-| T9 bootstrap DryRun | PASS（正确解析 GitHub 地址） |
+| T9 bootstrap DryRun | PASS（正确解析 Gitee 地址） |
 | T10 bootstrap 零副作用 | 2/2 PASS |
 
 自测脚本：`.workbuddy/selftest.ps1`，报告：`.workbuddy/selftest.log`（PS 5.1 回归运行器：`.workbuddy/run51.ps1`，报告：`.workbuddy/selftest-ps51.log`）。
@@ -255,7 +255,7 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 
 | 问题 | 处理 |
 |------|------|
-| 5.1 默认不启用 TLS 1.2，下载 GitHub 归档会失败 | `bootstrap.ps1` 显式设置 `[Net.ServicePointManager]::SecurityProtocol = Tls12` |
+| 5.1 默认不启用 TLS 1.2，下载 Gitee 归档会失败 | `bootstrap.ps1` 显式设置 `[Net.ServicePointManager]::SecurityProtocol = Tls12` |
 | `Invoke-WebRequest` 在 5.1 依赖 IE 引擎 | 统一加 `-UseBasicParsing` |
 | `ConvertTo-Json` 在 5.1 会把中文转义成 `\uXXXX` | 自实现 `ConvertTo-JsonEscapedString` 生成 JSON |
 | **5.1 按系统 ANSI 代码页（GBK）解析无 BOM 的 UTF-8 文件，中文会损坏并导致语法错误** | **以本地文件方式执行的脚本**统一保存为 **UTF-8 with BOM**（已在自测中实测复现该问题） |
@@ -272,11 +272,11 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 
 发布后真实环境（用户在国内网络）暴露两个问题，已修复：
 
-1. **`raw.githubusercontent.com` 解析失败（DNS）**：用户网络不通 GitHub（历史背景）。修复：README 以 **Gitee 主源** 作为一行命令；`bootstrap.ps1` 下载仓库 zip 以 **Gitee Release 资产优先、Gitee 分支归档回退**（`irm \| iex` 无法传 `-Source` 参数，故必须在脚本内自动降级）。
+1. **一行命令下载源不稳定（DNS / 镜像拦截）**：用户国内网络下远程源直连不稳定。修复：README 以 **Gitee 主源** 作为一行命令；`bootstrap.ps1` 下载仓库 zip 以 **Gitee Release 资产优先、Gitee 分支归档回退**（`irm \| iex` 无法传 `-Source` 参数，故必须在脚本内自动降级）。
 2. **`iex` 解析失败（BOM 导致，早期结论已修正）**：原 `bootstrap.ps1` 带 BOM 且开头是 `<#` 注释块，经 `irm \| iex` 后注释块失效。修复：移除 BOM（见 6.1 的早期处理）。
-3. **`Expand-Archive` 解压阶段崩溃「找不到中央目录结尾记录」**：用户在国内网络下，GitHub 不通 → 回退 Gitee 时，镜像返回 **HTTP 200 的 HTML 登录/拦截页（约 40KB）**，被当成 zip 下载，解压即崩。修复：`Get-RepoArchive` 下载后做**两道前置校验**——(a) 响应 `Content-Type` 为 `text/html` 直接抛「返回内容类型为 HTML」并提示登录页/错误页；(b) `Test-ZipFile` 校验 **ZIP 魔数（PK）+ 可打开完整性**，魔数不符抛「不是有效的 ZIP 压缩包」；两者均在 `Expand-Archive` 之前拦截，使「所有来源失败」能优雅回退并给出排查建议（离线 Local / git clone Gitee + setup.ps1 / 手动 zip）。同时下载源链补充 **GitHubProxy（ghproxy 代理镜像）**，默认顺序调整为 **`GitHub → Gitee → GitHubProxy`**：Gitee 是国内自有镜像，通常比第三方代理更稳；GitHubProxy 作为最后兜底，并使用实测可用的 **`gh.ddlc.top`** 域名（原 `ghproxy.com` 在部分网络下会长时间无响应或只建隧道不返回数据）。`Get-RepoArchive` 还新增 **`-TimeoutSec 45`**，避免代理镜像卡死导致用户以为 PowerShell 无响应直接退出。`Test-ZipFile` 仅以魔数为硬门槛、完整性打开为尽力而为（不误杀合法 zip），并**移除了原先 `-lt 1024` 的长度门槛**（会误杀合法的小体积 zip，属 false negative）。已用自测脚本在 **PowerShell 5.1 与 7.x** 下覆盖：DryRun 列出三源、真 zip 解压成功、本地假 HTML 被拒、镜像返回 HTML 在下载阶段拦截、镜像返回非 ZIP 被拒——全部 PASS。
+3. **`Expand-Archive` 解压阶段崩溃「找不到中央目录结尾记录」**：用户在国内网络下远程源不可用 → 回退时，镜像返回 **HTTP 200 的 HTML 登录/拦截页（约 40KB）**，被当成 zip 下载，解压即崩。修复：`Get-RepoArchive` 下载后做**两道前置校验**——(a) 响应 `Content-Type` 为 `text/html` 直接抛「返回内容类型为 HTML」并提示登录页/错误页；(b) `Test-ZipFile` 校验 **ZIP 魔数（PK）+ 可打开完整性**，魔数不符抛「不是有效的 ZIP 压缩包」；两者均在 `Expand-Archive` 之前拦截，使「所有来源失败」能优雅回退并给出排查建议（离线 Local / git clone Gitee + setup.ps1 / 手动 zip）。`Get-RepoArchive` 还新增 **`-TimeoutSec 45`**，避免镜像卡死导致用户以为 PowerShell 无响应直接退出。`Test-ZipFile` 仅以魔数为硬门槛、完整性打开为尽力而为（不误杀合法 zip），并**移除了原先 `-lt 1024` 的长度门槛**（会误杀合法的小体积 zip，属 false negative）。已用自测脚本在 **PowerShell 5.1 与 7.x** 下覆盖：DryRun 列出两源、真 zip 解压成功、本地假 HTML 被拒、镜像返回 HTML 在下载阶段拦截、镜像返回非 ZIP 被拒——全部 PASS。
 
-> Gitee 镜像源假设仓库 `pingwang1994/OpenCpolarSync` 已存在；若该镜像未建立，则 Gitee 回退同样失败，需改用 `-Source Local` 离线归档。
+> Gitee 主源仓库为 `pingwang1994/OpenCpolarSync`；若临时不可用，可改用 `-Source Local` 离线归档。
 
 ### 6.3 bootstrap.ps1 双跑法改造（对齐 Win11Debloat Get_CN.ps1）
 
@@ -292,27 +292,27 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 - 本地 `.\` 跑时，PS 5.1 靠 BOM 识别 UTF-8，中文正确解码。
 
 **双引擎实测**（5.1.26100 + 7.6.4）：
-- `.\bootstrap.ps1 -DryRun` → 中文正常（「一键部署」「演练模式」等无乱码），三源顺序正确，零错误。
+- `.\bootstrap.ps1 -DryRun` → 中文正常（「一键部署」「演练模式」等无乱码），两源顺序正确，零错误。
 - `[scriptblock]::Create(内容)`（`irm|iex` 的解析层）→ `PARSE OK`，无语法错误。
 
 **结论**：一个脚本同时兼容 `irm|iex` 与 `.\` 的正确姿势是 **BOM + `param()` 在前**，而非「无 BOM 专供 irm」。此前「本地脚本要 BOM、远程脚本要无 BOM」的二分法，在此场景下被更优的统一方案取代。
 
-### 6.4 TLS 证书回调 bug 修复（三源统一「基础连接已经关闭」）
+### 6.4 TLS 证书回调 bug 修复（各源统一「基础连接已经关闭」）
 
-**触发**：用户在本机 `.\` 直接运行 bootstrap，三个源（GitHub / Gitee / GitHubProxy）**统一**报 `基础连接已经关闭: 发送时发生错误`，但用户执行 `Get_CN.ps1` 却能正常下载。
+**触发**：用户在本机 `.\` 直接运行 bootstrap，各下载源**统一**报 `基础连接已经关闭: 发送时发生错误`，但用户执行 `Get_CN.ps1` 却能正常下载。
 
 **根因**：`Get-RepoArchive` 里有两行 `ServicePointManager` 全局设置，其中第 2 行是元凶：
 ```powershell
 [System.Net.ServicePointManager]::SecurityProtocol = ... -bor [System.Net.SecurityProtocolType]::Tls12
 [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }  # ← 问题所在
 ```
-`ServerCertificateValidationCallback` 是 **AppDomain 级全局回调**，设为 `{ $true }` 会干扰/破坏 .NET 底层 TLS 握手，在有代理/防火墙做 TLS 拦截的环境下，握手在「发送」阶段即失败 → 三个源报同一个错（不可能是三站同时挂）。而 `Get_CN.ps1` 完全不碰这些设置，靠 PowerShell 默认行为即可正常下载。
+`ServerCertificateValidationCallback` 是 **AppDomain 级全局回调**，设为 `{ $true }` 会干扰/破坏 .NET 底层 TLS 握手，在有代理/防火墙做 TLS 拦截的环境下，握手在「发送」阶段即失败 → 各源报同一个错（不可能是多站同时挂）。而 `Get_CN.ps1` 完全不碰这些设置，靠 PowerShell 默认行为即可正常下载。
 
 **修复（v1.4）**：
 1. **删除** `ServerCertificateValidationCallback = { $true }`（全局关证书校验既有副作用又有安全风险）。
 2. 保留显式 `Tls12`（PS 5.1 默认仅 Ssl3|Tls，连不上要求 TLS1.2+ 的 CDN，这个是有必要的），但改为更明确的 `[System.Net.SecurityProtocolType]::Tls12` 直接赋值。
 
-**实测**：删除回调后，真实下载 Gitee 归档成功（TLS 握手通过，不再报「基础连接已经关闭」）；沙箱访问 Gitee 返回 HTML 登录页，两层防护（`Content-Type=text/html` 拦截 + ZIP 魔数校验）均正常识别并会回退。用户本机（自有国内镜像）可拿到真 zip。
+**实测**：删除回调后，真实下载 Gitee 归档成功（TLS 握手通过，不再报「基础连接已经关闭」）；沙箱访问 Gitee 返回 HTML 登录页，两层防护（`Content-Type=text/html` 拦截 + ZIP 魔数校验）均正常识别并会回退。用户本机可正常拿到真 zip。
 
 **教训**：`ServerCertificateValidationCallback` 这类 AppDomain 级全局设置不要轻易在脚本里设置；「放宽证书校验」的初衷（绕开 CRYPT_E_NO_REVOCATION_CHECK）应交给环境本身处理（如 `git -c http.schannelCheckRevoke=false` 仅针对 git，而非全局回调）。
 

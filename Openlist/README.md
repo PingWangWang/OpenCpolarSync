@@ -106,7 +106,7 @@ Openlist/
 
 ## 关于 openlist
 
-`openlist.exe` 是一个基于 [Alist](https://github.com/AlistGo/alist) 的文件管理 Web 服务，提供：
+`openlist.exe` 是一个基于 Alist 的文件管理 Web 服务，提供：
 
 - Web 界面文件管理（上传/下载/浏览）
 - 多协议支持（FTP / SFTP / S3）
