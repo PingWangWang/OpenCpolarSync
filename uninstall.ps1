@@ -140,7 +140,11 @@ foreach ($procName in $processes) {
             try {
                 $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction SilentlyContinue).CommandLine
             } catch { }
-            if ($cmdLine -and ($cmdLine -match 'CpolarGuard|OpenlistGuard|GuardCheck')) {
+            # 【不要改回裸文件名匹配】必须要求 `-File` 后跟着该 Guard 脚本的完整路径。
+            # 只匹配 'CpolarGuard|OpenlistGuard|GuardCheck' 这三个名字的话，任何命令行里
+            # 恰好「提到」它们的无关 powershell 都会被 Stop-Process 误杀（例如用户自己
+            # 在终端里 Get-Content 某个 GuardCheck.ps1）。误杀他人的进程比漏检严重得多。
+            if ($cmdLine -and ($cmdLine -match '-File\s+"?[^"]*\\(CpolarGuard|OpenlistGuard|GuardCheck)\.ps1("|\s|$)')) {
                 Write-Log 'STEP' "停止守护进程：$($p.ProcessName) (PID=$($p.Id))"
                 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
                 $stopped += $p.Id

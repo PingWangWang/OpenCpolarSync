@@ -682,6 +682,153 @@ Cpolar      运行中（PID=6396）
 > 两个任务名与 bat 的一致性、等待函数）均已单独核验，真机首次部署时可留意阶段 6 是否依次出现
 > `已触发计划任务：…` 与 `Openlist 已就绪：http://localhost:5244（PID=…）`。
 
+---
+
+### 6.11 【回归】Guard 从未被拉起 —— 命令行进程匹配把自己匹配了进去
+
+> 本节记录的是 **6.10 那次修复自身引入的回归**，以及随后的真机端到端验证。
+> 6.9 的「宁可漏检，也不误杀」原则没错，但当时的实现把匹配范围放得太宽，反而变成了「永远误判为存在」。
+
+#### 现象
+
+真机（用户名 `Administrator`，`v1.1.15` 全新安装）阶段 6 全部显示**成功**：
+
+```
+阶段 6/7  ·  守护与自启
+√ 注册 Watchdog 计划任务（setup all） 完成
+√ 已触发计划任务：OpenCpolarSync_CpolarGuard_Watchdog
+√ 已触发计划任务：OpenCpolarSync_OpenlistGuard_Watchdog
+→ 等待 Openlist 就绪（最多 30 秒）...
+! 等待超时：Openlist 尚未就绪，Guard 会在后续轮询周期自动重试
+· 排查日志：...\app\Openlist\logs\guard.log
+```
+
+但 30 秒、1 分钟、十几分钟后 openlist 依然起不来。用户追问：
+「为什么 openlist 还是无法拉起来，不是 `./openlist.exe` 就可以拉起来吗」。
+
+#### 取证
+
+| 证据 | 含义 |
+|---|---|
+| `Openlist\logs\guard.log` **根本不存在** | `OpenlistGuard.ps1` **从未运行过** |
+| `openlist.exe version` 输出正常（`go1.26.4 windows/amd64`） | exe 本身没问题，**只是没人给它下 `server` 指令** |
+| `watchdog.log` 每 tick 都是 `Openlist Guard 进程已存在 (PID=…)`，**但 PID 每次都变** | 若 Guard 真的常驻，PID 应当稳定 → 匹配到的是**另一个进程** |
+| 计划任务参数含 `-GuardScriptPath "...\Openlist\OpenlistGuard.ps1"` | `GuardCheck.ps1` **自己的命令行**里就带着这个路径 |
+
+根因：6.9 那次为 `GuardCheck.ps1` 加的「进程级兜底」写成了
+
+```powershell
+if ("$($p.CommandLine)" -like "*$GuardScriptPath*") { ... 判定「Guard 已存在」... }
+```
+
+而 GuardCheck 自己的命令行是
+`... -File "...\Watchdog\GuardCheck.ps1" -GuardName Openlist -MutexName "..." -GuardScriptPath "...\Openlist\OpenlistGuard.ps1" ...`
+→ **永远匹配到自己** → 永远走「跳过拉起」分支 → **两个 Guard 从注册那一刻起就没被启动过**。
+`guard.log` 不存在，正是「从没跑过」的物证。
+
+> 这与 6.9 里 `setup.ps1::Get-ToolProcesses` 踩的坑**是同一个**（当时已把教训写进该函数注释），
+> 但没有同步到 `GuardCheck.ps1` —— **教训只写在一处，就只在一处生效**。
+
+#### 影响面（比表面的 openlist 更大）
+
+| # | 影响 | 说明 |
+|---|---|---|
+| 1 | openlist 永远起不来 | 本工具的核心目标（5244 网盘服务）完全失效 |
+| 2 | **CpolarGuard 也从未启动** | 隧道监控/告警实际是死的。cpolar 在跑只因 cpolar 客户端自身常驻，与本工具无关 —— 极易被误判为「守护正常」 |
+| 3 | `watchdog.log` 每次都说「已存在」 | 日志**说谎**，把「从未启动」伪装成「一直健康」，直接误导了一轮排查 |
+
+#### 修复（4 处）
+
+1. **`Watchdog\GuardCheck.ps1`：匹配范围收紧为「`-File` 紧跟完整路径」**
+   抽出 `Find-GuardProcess` 统一匹配逻辑：
+
+   ```powershell
+   $pattern = '-File\s+"?' + [regex]::Escape($GuardPath) + '"?(\s|$)'
+   ```
+
+   并显式 `if ([int]$p.ProcessId -eq $PID) { continue }` 排除自身 ——
+   严格区分「**以它启动**」与「**只是提到它**」。
+
+2. **`GuardCheck.ps1`：拉起后回头确认一次存活**（消除「假成功日志」）
+   `Start-Process` 返回 PID 只说明**进程创建**成功，Guard 抢不到 Mutex 或脚本自身报错
+   都会在毫秒级退出。现在 `Start-Sleep 3` 后复查存活，并按情形写出**不同等级**的日志：
+
+   | 情形 | 日志 |
+   |---|---|
+   | 进程存活 | `[RESTART] … Guard 已拉起 (PID=…)` |
+   | 已退出，但已有别的 Guard 在跑（正常竞态） | `[INFO] … 新实例已退出，但已有 Guard (PID=…) 在运行` |
+   | 已退出，且无任何 Guard | `[ERROR] … 拉起后 3 秒内即退出，且无 Guard 在运行 —— 请查看 <guard.log>` |
+
+   同时改用绝对路径 `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` 启动，
+   避免 S4U 非交互会话里 `PATH` 不含 `WindowsPowerShell\v1.0`。
+
+3. **`setup.ps1::Get-ToolProcesses`：同步收紧**
+   原实现除 `-like` 宽松匹配外，CIM 过滤串还写错成
+   `"Name='powershell.exe' OR pwsh.exe'"`（第二个条件缺 `Name=`）→ WQL 解析失败 →
+   函数**静默返回空数组** → 向导的「Guard：未运行」也**永远是**未运行。
+   现改为 `"Name='powershell.exe' OR Name='pwsh.exe'"` + 同样的正则匹配。
+
+4. **`uninstall.ps1`：卸载时的脚本识别同步收紧**
+   原实现按裸文件名匹配（`-match 'CpolarGuard|OpenlistGuard|GuardCheck'`），任何命令行里
+   *提到* 这三个名字的无关 powershell 都会被 `Stop-Process` 误杀；现改为
+   `-File\s+"?[^"]*\\(CpolarGuard|OpenlistGuard|GuardCheck)\.ps1("|\s|$)`。
+
+#### 真机端到端验证（本次为**真机实证**，非沙箱推断）
+
+沙箱拦截 `Start-Process` 与 `schtasks`，无法本地触发。做法：把修复版 `GuardCheck.ps1`
+放入已部署目录（先备份 `GuardCheck.ps1.bak_<时间戳>`），然后**等计划任务自身的 5 分钟重复周期**跑到。
+
+```
+# 修复前（17:08–17:09，共 4 次 tick）—— 全部误判为「已存在」，PID 每次不同
+[17:08:49] [INFO]    Watchdog tick for Openlist
+[17:08:49] [INFO]    Openlist Guard 进程已存在 (PID=25548)，跳过拉起
+[17:09:48] [INFO]    Openlist Guard 进程已存在 (PID=24640)，跳过拉起
+
+# 修复后（17:14，同一台机器、同一个任务，未重启、未重注册）
+[17:14:47] [INFO]    Watchdog tick for Cpolar
+[17:14:48] [RESTART] Cpolar Guard 不在运行，正在尝试拉起...
+[17:14:48] [RESTART] Cpolar Guard 已拉起 (PID=12896)
+[17:14:49] [INFO]    Watchdog tick for Openlist
+[17:14:50] [RESTART] Openlist Guard 不在运行，正在尝试拉起...
+[17:14:50] [RESTART] Openlist Guard 已拉起 (PID=4168)
+```
+
+`Openlist\logs\guard.log`（**首次出现**）：
+
+```
+[17:14:51] [INFO]  OpenlistGuard started. ScriptDir=...\app\Openlist
+[17:14:51] [INFO]  openlist.exe not running. Starting: ...\openlist.exe server
+[17:14:51] [INFO]  openlist.exe started. PID=5756
+[17:15:07] [INFO]  Guard loop started. Poll interval: 60s
+[17:16:07] [CHECK] openlist.exe is running. PID=5756
+```
+
+| 验证项 | 结果 |
+|---|---|
+| `Get-Process openlist` | `PID=5756`，路径 = 已部署目录 |
+| 端口 5244 | 监听 `True`；`http://127.0.0.1:5244` → **HTTP 200**，3588 字节 |
+| 计划任务 | 两个任务 `State=Ready`、`LastTaskResult=0` |
+| 进程命令行 | `powershell.exe -ExecutionPolicy Bypass -File "...\CpolarGuard.ps1"` / `"...\OpenlistGuard.ps1"` —— 与 `Find-GuardProcess` 正则一致 |
+
+匹配语义单测（用**真实**计划任务参数构造）：
+
+| 用例 | 期望 | 结果 |
+|---|---|---|
+| GuardCheck 自身命令行（含 `-GuardScriptPath`） | 不命中 | PASS |
+| Guard 真实命令行（带引号） | 命中 | PASS |
+| Guard 命令行（无引号） | 命中 | PASS |
+| `-Command "& '…Guard.ps1'"`（非 `-File` 启动） | 不命中 | PASS |
+| 另一目录下的同名脚本 | 不命中 | PASS |
+
+#### 教训
+
+1. **要断言「它是怎么被启动的」，而不是「它的命令行里有没有这个字符串」** ——
+   脚本自己的参数里常常就带着目标路径，宽松匹配必然自匹配。
+2. **一条教训只写在一个地方 = 只在那个地方生效。** 6.9 已把这条写进 `Get-ToolProcesses`，
+   却没同步到 `GuardCheck.ps1`；同类代码必须一起改。
+3. **`Start-Process` 成功 ≠ 子进程活着。** 凡是「拉起一个长期进程」的地方都应回头确认一次存活，
+   否则日志会写出「假成功」——而假成功比报错更难排查。
+4. **「PID 每次都变」是判断是否真的常驻的强信号**：稳定的守护进程 PID 应当稳定。
 
 ---
 
@@ -700,7 +847,7 @@ Cpolar      运行中（PID=6396）
 
 ```powershell
 # 方式一：免 clone 一键部署
-irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 | iex
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.16/bootstrap.ps1 | iex
 
 # 方式二：已 clone 仓库，直接跑向导
 powershell -ExecutionPolicy Bypass -File .\setup.ps1

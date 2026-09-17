@@ -36,7 +36,7 @@
 
     典型用法（在 PowerShell 中粘贴执行）：
     # 从 Gitee 获取本脚本（项目主源，推荐一行命令）：
-    irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 | iex
+    irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.16/bootstrap.ps1 | iex
     # 或先从 Gitee raw 拉取引导器再运行：
     irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
     # 或下载到本地后直接运行（本脚本为 UTF-8 with BOM，.\\ 直接跑不乱码）：
@@ -564,7 +564,7 @@ if ($skipFetch) {
         Write-Host '  1) 若提示"不是有效的 ZIP / 返回了登录页"，通常是 Gitee 对匿名请求不返回源码' -ForegroundColor Yellow
         Write-Host '     归档（只给登录页 HTML），或该 Release 未上传 OpenCpolarSync*.zip 发布包。' -ForegroundColor Yellow
         Write-Host '     请到 Gitee 发行版确认已上传发布包资产，或改用本地归档离线部署：' -ForegroundColor Yellow
-        Write-Host '     .\bootstrap.ps1 -Source Local -LocalArchivePath "D:\path\to\OpenCpolarSync_v1.1.15.zip"' -ForegroundColor Yellow
+        Write-Host '     .\bootstrap.ps1 -Source Local -LocalArchivePath "D:\path\to\OpenCpolarSync_v1.1.16.zip"' -ForegroundColor Yellow
         Write-Host '  2) 或先 clone 再运行（从 Gitee 获取源码）：' -ForegroundColor Yellow
         Write-Host '     git clone https://gitee.com/pingwang1994/OpenCpolarSync.git ; .\setup.ps1' -ForegroundColor Yellow
         Write-Host '  3) 也可到 Gitee 发行版页面手动下载发布包后离线部署：' -ForegroundColor Yellow

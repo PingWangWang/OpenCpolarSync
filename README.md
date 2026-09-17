@@ -4,7 +4,7 @@
 
 ![Gitee](https://img.shields.io/badge/platform-Gitee-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/version-1.1.15-orange)
+![Version](https://img.shields.io/badge/version-1.1.16-orange)
 
 ## 项目简介
 
@@ -29,7 +29,7 @@ OpenCpolarSync 是一个面向 Windows 用户的工具集，核心功能：
 在 **Windows PowerShell** 中粘贴执行（无需安装 git，无需手动下载）：
 
 ```powershell
-irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 | iex
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.16/bootstrap.ps1 | iex
 ```
 
 启动后会先询问操作类型：
@@ -59,7 +59,7 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
 同样的命令，选 `2` 即可：
 
 ```powershell
-irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 | iex
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.16/bootstrap.ps1 | iex
 # 选择 2. 卸载
 ```
 
@@ -77,7 +77,7 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 
 ```powershell
 # 下载到本地
-irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.16/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
 
 # 带 -Force 参数运行（强制重新下载程序文件）
 & $env:TEMP\bootstrap.ps1 -Force
@@ -88,7 +88,7 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 ### 直接卸载（跳过选择菜单）
 
 ```powershell
-irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.16/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
 & $env:TEMP\bootstrap.ps1 -Uninstall
 ```
 
@@ -286,7 +286,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 `irm | iex` 无法传参数，需先下载再运行：
 
 ```powershell
-irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.16/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
 & $env:TEMP\bootstrap.ps1 -Force
 ```
 
@@ -313,18 +313,45 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 
 ### Q: 首次部署完成后 `Openlist` 显示「未运行」，5244 也打不开？
 
-先确认是不是**时间没到**。`openlist.exe` 不是向导直接启动的，而是由 `OpenlistGuard` 启动，
-而 Guard 由 Watchdog 计划任务拉起。
+先分清两种**完全不同**的原因：**时间没到**（正常）和 **Guard 根本没被启动**（旧发布包的缺陷，已修）。
 
-- **v1.1.15 起（当前版本）**：向导在阶段 6 注册完计划任务后会**立刻触发一次**并等待 Openlist
-  就绪（默认最多 30 秒）；一般收尾时摘要里就是「运行中（PID=…）」，页面也会正常打开。
+`openlist.exe` 不是向导直接启动的，而是由 `OpenlistGuard` 启动，而 Guard 由 Watchdog 计划任务拉起。
+
+**情况一：时间没到（正常）**
+
+- 向导在阶段 6 注册完计划任务后会**立刻触发一次**并等待 Openlist 就绪（默认最多 30 秒）；
+  一般收尾时摘要里就是「运行中（PID=…）」，页面也会正常打开。
 - 若摘要显示「尚未就绪」，说明等待超时了。它**不是部署失败**——Guard 会在后续轮询周期继续重试，
   通常 1 分钟内起来。等一会儿再刷新 http://localhost:5244 即可。
-- 若**一直**起不来，看这两个日志：
-  - `%LOCALAPPDATA%\OpenCpolarSync\app\Openlist\logs\guard.log` —— 里面 `openlist.exe started. PID=…`
-    说明启动成功；`openlist.exe not found at:` 说明解压没做成功；`started` 之后紧跟 `not found`
-    说明进程起来后立刻退出了。
-  - `%LOCALAPPDATA%\OpenCpolarSync\app\Watchdog\watchdog.log` —— 每次计划任务 tick 与 Guard 重启记录。
+
+**情况二：Guard 从未被启动（旧发布包的缺陷）**
+
+判据很明确：`%LOCALAPPDATA%\OpenCpolarSync\app\Openlist\logs\guard.log` **始终不存在**，
+而 `...\app\Watchdog\watchdog.log` 里每次 tick 都写着
+`Openlist Guard 进程已存在 (PID=…)`、**但 PID 每次都不一样**。
+
+- `guard.log` 不存在 ⇒ `OpenlistGuard.ps1` **从来没跑过**（它一启动就会写日志）。
+- PID 每次都变 ⇒ 那个「已存在」的其实是 `GuardCheck.ps1` 自己，不是 Guard。
+  真正的守护进程 PID 应当是稳定的。
+
+根因：旧版 `GuardCheck.ps1` 用「命令行里出现过 Guard 脚本路径」判定「Guard 已在运行」，
+而计划任务给 `GuardCheck.ps1` 的参数里恰好带着 `-GuardScriptPath "<Guard 路径>"` —— 它**永远匹配到自己**，
+于是永远走「跳过拉起」，两个 Guard 从未启动。
+（同一缺陷下 `CpolarGuard` 也没启动，隧道监控其实是死的；cpolar 进程在跑只因 cpolar 客户端自身常驻，
+与守护无关 —— 这一点极易被误判为「守护正常」。）
+
+**怎么确认自己装的是修复版**：`...\app\Watchdog\GuardCheck.ps1` 里应当有 `Find-GuardProcess`
+这个函数名。没有的话，重新执行一次安装命令（或双击桌面向导选「安装 / 更新」）升级到修复版即可。
+
+**日志怎么读**
+
+- `guard.log`（`Openlist\logs\`）
+  - `openlist.exe started. PID=…` → 启动成功
+  - `openlist.exe not found at:` → 解压没成功
+  - `started` 之后紧跟 `not found` → 进程起来后立刻退出了
+- `watchdog.log`（`Watchdog\`）
+  - `[RESTART] … Guard 已拉起 (PID=…)` → 拉起成功（修复版会**回头确认存活**之后才这样写）
+  - `[ERROR] … 拉起后 3 秒内即退出，且无 Guard 在运行` → Guard 真的起不来，按提示看 guard.log
 
 > 顺带一提：`Cpolar` 显示「运行中」不代表是向导启动的——cpolar 是自带常驻的客户端，通常在跑向导之前
 > 就已经在运行了，因此它和 Openlist 的启动时机不可比。
@@ -380,7 +407,7 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 
 | 位置 | 内容 |
 |------|------|
-| `bootstrap.ps1` | `$coreUrl` 里硬编码的 tag：`.../releases/download/v1.1.15/bootstrap-core.ps1` |
+| `bootstrap.ps1` | `$coreUrl` 里硬编码的 tag：`.../releases/download/v1.1.16/bootstrap-core.ps1` |
 | `build_release_zip.ps1` | `$Tag` 默认值 |
 | `publish_gitee_release.ps1` | `$Tag` 默认值 |
 | `README.md` | 徽标版本号 + 各条安装命令 URL 里的 tag |
@@ -423,11 +450,11 @@ git push origin main
 ```powershell
 $commit = (git rev-parse HEAD).Trim()          # 或用 git log --oneline -1 看提交号
 
-git tag -f v1.1.15 $commit
-git push -f origin refs/tags/v1.1.15
+git tag -f v1.1.16 $commit
+git push -f origin refs/tags/v1.1.16
 
 # 必须核实远端 tag 真的指向新提交（git tag 只是本地的，不算数）
-git ls-remote --tags --refs origin v1.1.15
+git ls-remote --tags --refs origin v1.1.16
 ```
 
 #### ⑥ 发布（构建发布包 + 上传资产）
@@ -436,10 +463,10 @@ git ls-remote --tags --refs origin v1.1.15
 # 令牌只放环境变量，绝不写进脚本、绝不提交
 $env:GITEE_TOKEN = '<你的 Gitee 私人令牌>'
 
-.\publish_gitee_release.ps1 -Tag v1.1.15
+.\publish_gitee_release.ps1 -Tag v1.1.16
 ```
 
-脚本自动完成：`git archive` 构建 `%TEMP%\OpenCpolarSync_v1.1.15.zip`（约 **75MB**）→ 建/复用 Release → 上传三个资产（`bootstrap.ps1`、`bootstrap-core.ps1`、发布包）。
+脚本自动完成：`git archive` 构建 `%TEMP%\OpenCpolarSync_v1.1.16.zip`（约 **75MB**）→ 建/复用 Release → 上传三个资产（`bootstrap.ps1`、`bootstrap-core.ps1`、发布包）。
 
 - 上传 75MB 需几分钟，属正常，建议后台跑并看脚本自己输出的 `SCRIPT_RC=0`。
 - 构建失败时脚本**直接中止**，不会发出残缺 Release（这点是刻意的，见「常见坑」）。
@@ -452,7 +479,7 @@ $env:GITEE_TOKEN = '<你的 Gitee 私人令牌>'
 Invoke-RestMethod 'https://gitee.com/api/v5/repos/pingwang1994/OpenCpolarSync/releases/latest' | Select-Object tag_name
 
 # b) 匿名下载发布包，确认是真 zip + 大小约 75MB
-irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/OpenCpolarSync_v1.1.15.zip `
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.16/OpenCpolarSync_v1.1.16.zip `
     -OutFile $env:TEMP\check.zip
 
 # c) 校验魔数：合法 ZIP 以 PK 开头（十六进制 50 4B 03 04）
@@ -478,6 +505,10 @@ $b = New-Object byte[] 4; [void]$fs.Read($b, 0, 4); $fs.Close()
 | 新建 Release 报 400 Bad Request | tag 尚不存在时必须带 `target_commitish` |
 | PowerShell 脚本在 5.1 下中文乱码 | 见下「编码约定」 |
 | `Setup.ps1` 语法/中文异常 | 用 UTF-8 with BOM 保存；`param()` 必须放文件最前，帮助注释块移到其后 |
+| 用命令行匹配进程，结果**匹配到了脚本自己** | 计划任务/命令行参数里常带着目标路径（如 `-GuardScriptPath "...\OpenlistGuard.ps1"`），`-like "*路径*"` 必然**自匹配** → 永远判定「已存在、跳过拉起」。必须要求 `-File` **紧跟**该脚本完整路径，并排除自身 `$PID` |
+| 日志写着「已拉起」但进程其实没起来 | `Start-Process` 返回 PID 只代表**进程创建**成功。拉起长驻进程后应 `Start-Sleep` 再确认存活，否则会写出**假成功日志**（比报错更难查） |
+| 守护进程日志里 PID **每次都变** | 说明匹配到的不是守护进程本身（真正常驻的进程 PID 应当稳定）。配套查「它自己的日志文件是否存在」——不存在即从未运行过 |
+| CIM `Win32_Process` 过滤串写错 → 函数静默返回空 | WQL 里每个条件都要写全 `Name=`，写成 `"Name='powershell.exe' OR pwsh.exe'"` 会解析失败，被 `catch` 吞掉后返回空数组，表现为「检测永远说未运行」 |
 
 ### 编码约定（务必保持）
 

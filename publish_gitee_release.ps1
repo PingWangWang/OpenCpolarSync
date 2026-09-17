@@ -10,7 +10,7 @@ param(
     [string]$TokenFile,
     [string]$Owner = 'pingwang1994',
     [string]$Repo  = 'OpenCpolarSync',
-    [string]$Tag   = 'v1.1.15',
+    [string]$Tag   = 'v1.1.16',
     [string]$TargetCommitish = 'main',
     [switch]$SkipZip,
     [switch]$DryRun

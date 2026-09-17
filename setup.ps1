@@ -272,10 +272,17 @@ function Get-ProcessList {
 # Function: Get-ToolProcesses — 找出「本工具自己」的 Guard 进程
 #
 # 双重限定，避免误判（误判的后果是 Stop-Process 直接结束用户的进程）：
-#   1) 命令行必须以 -File 方式运行（排除 -Command / -EncodedCommand 里只是
-#      「提到」了某个 Guard 文件名的进程）；
-#   2) 必须匹配 Guard 脚本的**完整路径**（根目录由调用方传入）。
-# 只提供 BaseDir 而不做文件名通配，宁可漏检也不误杀。
+#   1) 命令行里必须是 `-File` **直接跟着**该脚本的完整路径 —— 即真的以该脚本
+#      为入口启动的进程（根目录由调用方传入，不做文件名通配）；
+#   2) 排除自身 PID。
+# 宁可漏检也不误杀。
+#
+# 【为什么不能「路径出现在命令行里就算命中」】计划任务给 GuardCheck.ps1 传的参数里
+# 带着 `-GuardScriptPath "<Guard 脚本完整路径>"`（见 WatchdogManager.bat），因此
+# GuardCheck 自己的命令行也含该路径。宽松匹配会把 GuardCheck 误判成 Guard ——
+# 在 GuardCheck.ps1 里这个误判曾导致「永远认为 Guard 已存在、从不拉起它」
+# （详见该文件内的说明）。必须要求 `-File` 与路径相邻，才能区分
+# 「以它启动」与「只是提到它」。
 # ============================================================
 function Get-ToolProcesses {
     param([string]$BaseDir)
@@ -290,6 +297,14 @@ function Get-ToolProcesses {
         return @()
     }
 
+    $patterns = @()
+    foreach ($c in $candidates) {
+        $patterns += @{
+            Path    = $c
+            Pattern = ('-File\s+"?' + [regex]::Escape($c) + '"?(\s|$)')
+        }
+    }
+
     $result = @()
     try {
         $procs = Get-CimInstance Win32_Process `
@@ -300,14 +315,14 @@ function Get-ToolProcesses {
     }
 
     foreach ($p in @($procs)) {
+        if ([int]$p.ProcessId -eq $PID) { continue }
         $cmd = "$($p.CommandLine)"
         if (-not $cmd) { continue }
-        if ($cmd -notmatch '\-File') { continue }
-        foreach ($c in $candidates) {
-            if ($cmd -like "*$c*") {
+        foreach ($c in $patterns) {
+            if ($cmd -match $c.Pattern) {
                 $result += [pscustomobject]@{
                     Id        = [int]$p.ProcessId
-                    Label     = (Split-Path $c -Leaf)
+                    Label     = (Split-Path $c.Path -Leaf)
                     StartTime = $p.CreationDate
                 }
                 break

@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $coreName = 'bootstrap-core.ps1'
-$coreUrl  = 'https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/' + $coreName
+$coreUrl  = 'https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.16/' + $coreName
 
 # Materialize the real script to a temp file so it can run in a new elevated process.
 $coreFile = Join-Path $env:TEMP 'OpenCpolarSync-bootstrap-core.ps1'
