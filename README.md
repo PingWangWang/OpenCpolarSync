@@ -437,6 +437,10 @@ $b = New-Object byte[] 4; [void]$fs.Read($b, 0, 4); $fs.Close()
 
 > ⚠️ **HTTP 200 不等于拿到了真 zip**——Gitee 返回的登录页 HTML 也是 200。必须确认魔数。
 > 更进一步，可以解压发布包后确认**关键脚本确实是新版**（例如 grep 新增的函数名），而不只是「下到的是个 zip」。
+>
+> ⚠️ **不要用 `Range: bytes=0-1` 去「只取两字节验魔数」**：Gitee CDN 会**忽略 Range**，以 HTTP 200 返回**整个 75MB 包**（不是 206，也没有 `Content-Range`）。要么先完整下载再取前 4 字节，要么限长读取（`$fs.Read($b,0,4)` 这种本地读法不受影响；受影响的是 HTTP 请求时手加 `Range` 头）。
+>
+> ⚠️ **写包内容断言前，先在源码里 grep 一遍**：① 别断言运行时拼出来的字符串（源码只有 `阶段 $Number/$Total`，`阶段 6/6` 在文件里不存在）；② 别用 `endswith('/README.md')` 这类后缀匹配，包里还有 `Openlist/README.md` / `Cpolar/README.md`，要用「顶层目录前缀 + 精确相对路径」定位。
 
 ### 常见坑
 
