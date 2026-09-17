@@ -111,7 +111,7 @@
 
 ```
 bootstrap.ps1（可选入口，免 clone）
-  ├─ 阶段 1  下载仓库归档（GitHub / Gitee / 本地三源）
+  ├─ 阶段 1  下载仓库归档（Gitee / 本地两源）
   ├─ 阶段 2  解压到 %LOCALAPPDATA%\OpenCpolarSync\app
   └─ 阶段 3  提权调用 setup.ps1
                 │
@@ -272,7 +272,7 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 
 发布后真实环境（用户在国内网络）暴露两个问题，已修复：
 
-1. **`raw.githubusercontent.com` 解析失败（DNS）**：用户网络不通 GitHub。修复：README 把 **Gitee 镜像 raw 地址** 作为国内首选一行命令；同时 `bootstrap.ps1` 下载仓库 zip 增加 **GitHub → Gitee 自动回退**（`irm \| iex` 无法传 `-Source` 参数，故必须在脚本内自动降级）。
+1. **`raw.githubusercontent.com` 解析失败（DNS）**：用户网络不通 GitHub（历史背景）。修复：README 以 **Gitee 主源** 作为一行命令；`bootstrap.ps1` 下载仓库 zip 以 **Gitee Release 资产优先、Gitee 分支归档回退**（`irm \| iex` 无法传 `-Source` 参数，故必须在脚本内自动降级）。
 2. **`iex` 解析失败（BOM 导致，早期结论已修正）**：原 `bootstrap.ps1` 带 BOM 且开头是 `<#` 注释块，经 `irm \| iex` 后注释块失效。修复：移除 BOM（见 6.1 的早期处理）。
 3. **`Expand-Archive` 解压阶段崩溃「找不到中央目录结尾记录」**：用户在国内网络下，GitHub 不通 → 回退 Gitee 时，镜像返回 **HTTP 200 的 HTML 登录/拦截页（约 40KB）**，被当成 zip 下载，解压即崩。修复：`Get-RepoArchive` 下载后做**两道前置校验**——(a) 响应 `Content-Type` 为 `text/html` 直接抛「返回内容类型为 HTML」并提示登录页/错误页；(b) `Test-ZipFile` 校验 **ZIP 魔数（PK）+ 可打开完整性**，魔数不符抛「不是有效的 ZIP 压缩包」；两者均在 `Expand-Archive` 之前拦截，使「所有来源失败」能优雅回退并给出排查建议（离线 Local / git clone Gitee + setup.ps1 / 手动 zip）。同时下载源链补充 **GitHubProxy（ghproxy 代理镜像）**，默认顺序调整为 **`GitHub → Gitee → GitHubProxy`**：Gitee 是国内自有镜像，通常比第三方代理更稳；GitHubProxy 作为最后兜底，并使用实测可用的 **`gh.ddlc.top`** 域名（原 `ghproxy.com` 在部分网络下会长时间无响应或只建隧道不返回数据）。`Get-RepoArchive` 还新增 **`-TimeoutSec 45`**，避免代理镜像卡死导致用户以为 PowerShell 无响应直接退出。`Test-ZipFile` 仅以魔数为硬门槛、完整性打开为尽力而为（不误杀合法 zip），并**移除了原先 `-lt 1024` 的长度门槛**（会误杀合法的小体积 zip，属 false negative）。已用自测脚本在 **PowerShell 5.1 与 7.x** 下覆盖：DryRun 列出三源、真 zip 解压成功、本地假 HTML 被拒、镜像返回 HTML 在下载阶段拦截、镜像返回非 ZIP 被拒——全部 PASS。
 
@@ -323,7 +323,7 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 | # | 事项 | 说明 |
 |---|------|------|
 | 1 | **Openlist 存储挂载仍为人工** | 挂载配置存于 openlist 自身数据库，跨版本格式不稳，强写易碎。当前只做「打开 Web + 步骤清单 + 隧道校验」引导 |
-| 2 | **GitHub 国内访问** | 已实现 GitHub / Gitee / 本地三源；`bootstrap.ps1` 默认 GitHub 且**下载阶段自动回退 Gitee**，国内一行命令无需手动追加参数 |
+| 2 | **Gitee 主源访问** | 已全面迁移至 Gitee：`bootstrap.ps1` 默认 Gitee，下载以 Gitee Release 资产优先、Gitee 分支归档回退，国内一行命令无需手动追加参数 |
 | 3 | **cpolar.yml 字段需实机验证** | 隧道 yml 的写法依据 `cpolar --help` 推导，建议在真机首次运行后确认隧道能正常建立 |
 | 4 | **CpolarGuard.ps1 编码** | 保持原有 BOM + CRLF（避免 1109 行全量 diff）；新增脚本统一 BOM + LF。如需全仓库统一换行，建议单独一次提交处理 |
 
@@ -333,7 +333,7 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 
 ```powershell
 # 方式一：免 clone 一键部署
-irm https://raw.githubusercontent.com/PingWangWang/OpenCpolarSync/main/bootstrap.ps1 | iex
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 | iex
 
 # 方式二：已 clone 仓库，直接跑向导
 powershell -ExecutionPolicy Bypass -File .\setup.ps1

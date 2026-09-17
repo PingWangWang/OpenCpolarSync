@@ -1,6 +1,10 @@
 param(
-    [string]$Tag = "v1.1.14"
+    [string]$Tag = "v1.1.15"
 )
+
+# 生成的发布包需作为 Gitee Release 资产上传（项目主源已迁移至 Gitee）：
+# 在 Gitee 仓库「发行版」中新建 tag 与 Release，并把 OpenCpolarSync_<Tag>.zip、
+# bootstrap.ps1、bootstrap-core.ps1 一并作为附件，供 irm|iex 一行命令取用。
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path

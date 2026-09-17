@@ -1,6 +1,6 @@
 ﻿param(
-    [ValidateSet('GitHub', 'Gitee', 'Local')]
-    [string]$Source = 'GitHub',
+    [ValidateSet('Gitee', 'Local')]
+    [string]$Source = 'Gitee',
 
     [string]$RepoUrl,
     [string]$Branch = 'main',
@@ -27,7 +27,7 @@
     OpenCpolarSync 一键启动器（免 clone 部署入口）。
 .DESCRIPTION
     一条命令即可完成部署，用户无需安装 git 或手动 clone 仓库：
-      1. 从 GitHub / Gitee / 本地归档下载仓库压缩包
+      1. 从 Gitee / 本地归档下载仓库压缩包
       2. 解压到 %LOCALAPPDATA%\OpenCpolarSync\app
       3. 以管理员权限调用 setup.ps1 完成后续全部部署步骤
 
@@ -35,10 +35,10 @@
     因此重复运行本脚本升级程序时不会覆盖已有配置（对齐 Win11Debloat 的做法）。
 
     典型用法（在 PowerShell 中粘贴执行）：
-    # 国内网络（GitHub 不通）优先用 Gitee 镜像获取本脚本：
+    # 从 Gitee 获取本脚本（项目主源，推荐一行命令）：
+    irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 | iex
+    # 或先从 Gitee raw 拉取引导器再运行：
     irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
-    # 或 GitHub 源（默认会自动回退 Gitee / 代理镜像下载）：
-    irm https://raw.githubusercontent.com/PingWangWang/OpenCpolarSync/main/bootstrap.ps1 | iex
     # 或下载到本地后直接运行（本脚本为 UTF-8 with BOM，.\\ 直接跑不乱码）：
     .\bootstrap.ps1
 
@@ -48,7 +48,7 @@
     因此 BOM 不影响 irm | iex。为保证两者兼容，本脚本把 param() 放在文件最前、
     注释块移到其后（BOM 顶在 param 前无害）。对齐 Win11Debloat 的 Get_CN.ps1 做法。
 .PARAMETER Source
-    下载来源：GitHub（默认）、Gitee 或 Local（使用本地 zip）。
+    下载来源：Gitee（默认）或 Local（使用本地 zip）。
 .PARAMETER RepoUrl
     自定义仓库归档地址，指定后忽略 -Source。
 .PARAMETER Branch
@@ -70,7 +70,7 @@
     交互方式下载并部署。
 .EXAMPLE
     .\bootstrap.ps1 -Source Gitee
-    从 Gitee 镜像下载（GitHub 访问不畅时使用）。
+    从 Gitee 下载（项目主源）。
 .NOTES
     Version: 1.4
     Compatible: Windows 7 SP1+ / PowerShell 5.0+
@@ -115,9 +115,8 @@ function Write-Log {
 
 # ============================================================
 # Function: Resolve-ArchiveUrl — 按来源解析仓库归档地址
-# 提供 GitHub / Gitee / GitHubProxy（ghproxy 代理镜像）三源，便于在国内网络环境下切换。
-# 默认回退顺序：GitHub → Gitee（国内自有镜像）→ GitHubProxy，避免第三方代理在部分网络下
-# 长时间无响应。当前 GitHubProxy 使用 gh.ddlc.top；若该镜像不可用，可改用 -RepoUrl 自定义。
+# 提供 Gitee 仓库归档作为唯一远程下载源（项目主源托管于 Gitee）。
+# 下载失败时使用 -RepoUrl 自定义归档地址，或用 -Source Local 走本地离线归档。
 # ============================================================
 function Resolve-ArchiveUrl {
     param(
@@ -129,9 +128,8 @@ function Resolve-ArchiveUrl {
     if ($Custom) { return $Custom }
 
     switch ($From) {
-        'GitHub' { return "https://github.com/PingWangWang/OpenCpolarSync/archive/refs/heads/$RefBranch.zip" }
         'Gitee'  { return "https://gitee.com/pingwang1994/OpenCpolarSync/repository/archive/$RefBranch.zip" }
-        default      { return $null }
+        default  { return $null }
     }
 }
 
@@ -245,7 +243,7 @@ function Get-RepoArchive {
     Write-Log 'STEP' "正在下载：$Url"
 
     # 函数级保护：下载/校验任何环节失败都清理临时文件并把异常抛给外层回退逻辑。
-    # 超时 45 秒，避免 ghproxy 等镜像在部分网络下长时间无响应导致用户以为卡死。
+    # 超时 45 秒，避免 Gitee 镜像在部分网络下长时间无响应导致用户以为卡死。
     try {
         Invoke-WebDownload -Url $Url -Destination $Destination -Name "下载 ($Url)"
 
@@ -266,9 +264,9 @@ function Get-RepoArchive {
 }
 
 # ============================================================
-# Function: Get-RepoArchiveFromRelease — 优先从 GitHub Release API 下载
-# 对齐 Win11Debloat 的做法：用 releases/latest 拿 zipball_url，再 Invoke-RestMethod 下载。
-# 仓库必须有公开 Release，否则该源失败并由外层回退到 archive/Gitee。
+# Function: Get-RepoArchiveFromRelease — 优先从 Gitee Release API 下载
+# 用 releases/latest 拿 zipball_url 或资产 browser_download_url，再下载。
+# 仓库必须在 Gitee 发布过 Release 并附资产，否则该源失败并由外层回退到 Gitee 分支归档。
 # ============================================================
 function Get-RepoArchiveFromRelease {
     param(
@@ -277,21 +275,21 @@ function Get-RepoArchiveFromRelease {
 
     # 显式启用 TLS 1.2，与 Get-RepoArchive 保持一致（PS 5.1 默认不含 TLS1.2）
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
-    $repo = 'PingWangWang/OpenCpolarSync'
+    $repo = 'pingwang1994/OpenCpolarSync'
 
     try {
-        $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -TimeoutSec 20
-        # 优先使用已发布的资产 zip（走 objects.githubusercontent.com，稳定，对齐 Win11Debloat 资产下载）；
-        # 没有资产时回退到 GitHub 自动生成的源码 zipball。
+        $latest = Invoke-RestMethod -Uri "https://gitee.com/api/v5/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'OpenCpolarSync' } -TimeoutSec 20
+        # 优先使用已发布的资产 zip（Gitee Release 附件，稳定）；
+        # 没有资产时回退到 Gitee 自动生成的源码 zipball。
         $asset = @($latest.assets) | Where-Object { $_.name -like 'OpenCpolarSync*.zip' } | Select-Object -First 1
         if ($asset -and $asset.browser_download_url) {
-            Write-Log 'STEP' "正在下载（GitHub Release 资产）：$($asset.name)"
+            Write-Log 'STEP' "正在下载（Gitee Release 资产）：$($asset.name)"
         } else {
             $asset = $null
             Write-Log 'STEP' "未找到 Release 资产，回退下载源码 zipball：$($latest.zipball_url)"
         }
         $downloadUrl = if ($asset) { $asset.browser_download_url } else { $latest.zipball_url }
-        if (-not $downloadUrl) { throw 'GitHub Release 未提供可下载的 zip' }
+        if (-not $downloadUrl) { throw 'Gitee Release 未提供可下载的 zip' }
 
         # 下载带进度条（Invoke-WebDownload 内部对下载做流式读 + Write-Progress），
         # 发布包可能较大且不同网络速度差异大，超时放宽到 30 分钟。
@@ -395,15 +393,15 @@ if ($skipFetch) {
     if ($Source -eq 'Local') {
         Write-Log 'INFO' "计划使用本地归档：$LocalArchivePath"
     } else {
-        $drySources = if ($Source -eq 'GitHub') { @('Release', 'GitHub', 'Gitee') } else { @($Source) }
+        $drySources = if ($Source -eq 'Gitee') { @('Release', 'Gitee') } else { @($Source) }
         foreach ($s in $drySources) {
             if ($s -eq 'Release') {
-                Write-Log 'INFO' '计划下载（Release）：GitHub Release API 获取 zipball'
+                Write-Log 'INFO' '计划下载（Release）：Gitee Release API 获取 zipball'
             } else {
                 Write-Log 'INFO' "计划下载（$s）：$(Resolve-ArchiveUrl -From $s -RefBranch $Branch -Custom $RepoUrl)"
             }
         }
-        Write-Log 'INFO' '（优先 GitHub Release，失败时回退 Gitee / 源码归档）'
+        Write-Log 'INFO' '（优先 Gitee Release，失败时回退 Gitee 源码归档）'
     }
     Write-Log 'INFO' "计划解压到：$appDir"
 } elseif ($Source -eq 'Local') {
@@ -420,9 +418,9 @@ if ($skipFetch) {
     Write-Log 'OK' "使用本地归档：$LocalArchivePath"
     $tempZip = $LocalArchivePath
 } else {
-    # 下载来源列表：默认 GitHub，失败时依次回退 Gitee（国内自有镜像）/ 代理镜像，
-    # 让「irm | iex」一行命令在国内网络（GitHub 不通）也能跑通，无需用户手动追加 -Source Gitee。
-    $trySources = if ($Source -eq 'GitHub') { @('Release', 'GitHub', 'Gitee') } else { @($Source) }
+    # 下载来源列表：默认 Gitee（项目主源），Release 资产优先，失败时回退 Gitee 分支归档，
+    # 让「irm | iex」一行命令稳定从 Gitee 拉取，无需用户手动追加参数。
+    $trySources = if ($Source -eq 'Gitee') { @('Release', 'Gitee') } else { @($Source) }
 
     $downloaded = $false
     foreach ($trySrc in $trySources) {
@@ -449,12 +447,12 @@ if ($skipFetch) {
         Write-Host '  1) 若提示"不是有效的 ZIP / 返回 HTML"，说明镜像源返回了登录页或错误页，' -ForegroundColor Yellow
         Write-Host '     通常是该仓库为私有或被网络拦截。请改用本地归档离线部署：' -ForegroundColor Yellow
         Write-Host '     .\bootstrap.ps1 -Source Local -LocalArchivePath "D:\path\to\main.zip"' -ForegroundColor Yellow
-        Write-Host '  2) 或先 clone 再运行（国内可用 Gitee 源）：' -ForegroundColor Yellow
+        Write-Host '  2) 或先 clone 再运行（从 Gitee 获取源码）：' -ForegroundColor Yellow
         Write-Host '     git clone https://gitee.com/pingwang1994/OpenCpolarSync.git ; .\setup.ps1' -ForegroundColor Yellow
         Write-Host '  3) 也可手动下载 zip 后离线部署：' -ForegroundColor Yellow
         Write-Host '     https://gitee.com/pingwang1994/OpenCpolarSync/repository/archive/main.zip' -ForegroundColor Yellow
         Write-Host '  4) 若某个来源长时间无响应后 PowerShell 直接退出，通常是该代理/镜像' -ForegroundColor Yellow
-        Write-Host '     在你当前网络下不可用。可直接强制走 Gitee（多数国内网络最稳）：' -ForegroundColor Yellow
+        Write-Host '     在你当前网络下不可用。默认即从 Gitee 下载（多数国内网络最稳）：' -ForegroundColor Yellow
         Write-Host '     irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1;' -ForegroundColor Yellow
         Write-Host '     & $env:TEMP\bootstrap.ps1 -Source Gitee' -ForegroundColor Yellow
         exit 1

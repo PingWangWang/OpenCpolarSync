@@ -2,7 +2,7 @@
 
 > Windows 平台：Cpolar 隧道状态监控 + Openlist 文件服务守护 + 运行时保活看门狗，支持一键部署与一键卸载
 
-![GitHub](https://img.shields.io/badge/platform-Windows-lightgrey)
+![Gitee](https://img.shields.io/badge/platform-Gitee-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Version](https://img.shields.io/badge/version-1.1.15-orange)
 
@@ -29,7 +29,7 @@ OpenCpolarSync 是一个面向 Windows 用户的工具集，核心功能：
 在 **Windows PowerShell** 中粘贴执行（无需安装 git，无需手动下载）：
 
 ```powershell
-irm https://github.com/PingWangWang/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 | iex
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 | iex
 ```
 
 启动后会先询问操作类型：
@@ -42,7 +42,7 @@ irm https://github.com/PingWangWang/OpenCpolarSync/releases/download/v1.1.15/boo
 
 选 `1` 即可进入安装向导，按提示输入配置即可。
 
-**国内网络备选（Gitee 镜像）：**
+**备用方式（Gitee raw 直链）：**
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -54,7 +54,7 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 | iex
 同样的命令，选 `2` 即可：
 
 ```powershell
-irm https://github.com/PingWangWang/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 | iex
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 | iex
 # 选择 2. 卸载
 ```
 
@@ -71,7 +71,7 @@ irm https://github.com/PingWangWang/OpenCpolarSync/releases/download/v1.1.15/boo
 
 ```powershell
 # 下载到本地
-irm https://github.com/PingWangWang/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
 
 # 带 -Force 参数运行（强制重新下载程序文件）
 & $env:TEMP\bootstrap.ps1 -Force
@@ -82,7 +82,7 @@ irm https://github.com/PingWangWang/OpenCpolarSync/releases/download/v1.1.15/boo
 ### 直接卸载（跳过选择菜单）
 
 ```powershell
-irm https://github.com/PingWangWang/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
 & $env:TEMP\bootstrap.ps1 -Uninstall
 ```
 
@@ -96,7 +96,7 @@ irm https://github.com/PingWangWang/OpenCpolarSync/releases/download/v1.1.15/boo
 |------|------|
 | `-Force` | 强制重新下载程序文件（跳过已安装检测） |
 | `-Uninstall` | 直接进入卸载模式，跳过选择菜单 |
-| `-Source GitHub/Gitee/Local` | 下载来源，默认 GitHub |
+| `-Source Gitee/Local` | 下载来源，默认 Gitee |
 | `-InstallDir <路径>` | 自定义安装目录，默认 `%LOCALAPPDATA%\OpenCpolarSync` |
 | `-DryRun` | 演练模式，只打印计划不执行 |
 | `-NoElevate` | 不自动请求管理员权限 |
@@ -210,6 +210,8 @@ OpenCpolarSync/
 ├── bootstrap-core.ps1          # 引导器主逻辑（下载+解压+安装/卸载选择）
 ├── setup.ps1                   # 一键部署向导
 ├── uninstall.ps1               # 一键卸载脚本
+├── build_release_zip.ps1       # 生成发布包 zip（作为 Gitee Release 资产分发）
+├── publish_gitee_release.ps1   # 一键发布到 Gitee（建/复用 Release + 上传资产）
 ├── Cpolar/                     # Cpolar 隧道监控
 │   ├── CpolarGuard.ps1         # 常驻守护脚本
 │   ├── AutoStart.bat           # 开机自启管理
@@ -250,7 +252,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 `irm | iex` 无法传参数，需先下载再运行：
 
 ```powershell
-irm https://github.com/PingWangWang/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1
 & $env:TEMP\bootstrap.ps1 -Force
 ```
 
