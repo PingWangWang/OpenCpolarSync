@@ -174,8 +174,47 @@ function Test-ZipFile {
 }
 
 # ============================================================
-# Function: Invoke-WebDownload — 带进度条下载文件
-# 用 HttpClient 流式下载并实时 Write-Progress（跨 5.1/7 一致），
+# Function: Test-ProgressEnabled / Write-ProgressLine / Complete-ProgressLine
+# —— 在当前「最新一行」（即底部）就地刷新的进度行
+# 为什么不用 Write-Progress：它在 Windows 控制台里固定占据【屏幕顶部】的一块区域，
+# 与下方滚动的日志脱节，看起来就像进度条跑到了顶部，且无法配置到底部。
+# 这里改为在当前光标处用 `\r` 就地覆盖刷新，进度便出现在最新一行（底部），与日志
+# 顺序一致。输出被重定向（如重定向写日志文件）时不绘制，避免把回车控制符写进日志。
+# ============================================================
+$script:ProgressEnabled = $null   # 延迟探测，避免在非控制台宿主里探测时抛错
+$script:ProgressLastLen = 0
+
+function Test-ProgressEnabled {
+    if ($null -ne $script:ProgressEnabled) { return $script:ProgressEnabled }
+    $ok = $false
+    try { $ok = -not [Console]::IsOutputRedirected } catch { $ok = $false }
+    $script:ProgressEnabled = $ok
+    return $ok
+}
+
+function Write-ProgressLine {
+    param([Parameter(Mandatory = $true)][string]$Text)
+
+    if (-not (Test-ProgressEnabled)) { return }
+    try {
+        # 用空格补齐上一次更长的内容，避免残留旧字符
+        $pad = if ($script:ProgressLastLen -gt $Text.Length) { ' ' * ($script:ProgressLastLen - $Text.Length) } else { '' }
+        Write-Host ("`r" + $Text + $pad) -NoNewline
+        $script:ProgressLastLen = $Text.Length
+    } catch {
+        $script:ProgressEnabled = $false   # 该宿主不支持就地刷新，静默降级为不显示进度
+    }
+}
+
+function Complete-ProgressLine {
+    if (-not (Test-ProgressEnabled)) { return }
+    try { Write-Host '' } catch { }        # 换行收尾，保证后续日志从新行开始
+    $script:ProgressLastLen = 0
+}
+
+# ============================================================
+# Function: Invoke-WebDownload — 带底部进度行下载文件
+# 用 HttpClient 流式下载，并在当前输出位置就地刷新一行进度（见上方说明）；
 # 支持大文件（如含 openlist.zip 的几十 MB 发布包），下载失败清理残留。
 # ============================================================
 function Invoke-WebDownload {
@@ -200,20 +239,37 @@ function Invoke-WebDownload {
         $fs = [System.IO.File]::Create($Destination)
         $buffer = New-Object byte[] 81920
         $received = [long]0
+        $completed = $false
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $lastDraw = -1000
         try {
             while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
                 $fs.Write($buffer, 0, $read)
                 $received += $read
-                if ($total -gt 0) {
-                    $pct = [int](($received / $total) * 100)
-                    Write-Progress -Activity $Name -Status ("{0:N1} MB / {1:N1} MB" -f ($received / 1MB), ($total / 1MB)) -PercentComplete $pct
-                } else {
-                    Write-Progress -Activity $Name -Status ("{0:N1} MB" -f ($received / 1MB))
+
+                # 限流重绘（约 100ms 一次），避免高速下载时刷屏
+                if (($sw.ElapsedMilliseconds - $lastDraw) -ge 100) {
+                    $lastDraw = $sw.ElapsedMilliseconds
+                    $sec = $sw.Elapsed.TotalSeconds
+                    $speed = if ($sec -gt 0) { ($received / 1MB) / $sec } else { 0 }
+                    if ($total -gt 0) {
+                        $pct = [int](($received / $total) * 100)
+                        Write-ProgressLine -Text ("{0}  {1:N1} / {2:N1} MB  {3,3}%  {4:N1} MB/s" -f $Name, ($received / 1MB), ($total / 1MB), $pct, $speed)
+                    } else {
+                        Write-ProgressLine -Text ("{0}  {1:N1} MB  {2:N1} MB/s" -f $Name, ($received / 1MB), $speed)
+                    }
                 }
             }
+            $completed = $true
         } finally {
             $fs.Close()
             $stream.Dispose()
+            $sw.Stop()
+            # 只有真正下完才补画 100%；中途失败时直接收尾，避免误报完成
+            if ($completed -and $total -gt 0) {
+                Write-ProgressLine -Text ("{0}  {1:N1} / {2:N1} MB  100%  完成" -f $Name, ($total / 1MB), ($total / 1MB))
+            }
+            Complete-ProgressLine
         }
         $client.Dispose()
         if ($received -eq 0) { throw '下载内容为空' }
@@ -305,7 +361,7 @@ function Get-RepoArchiveFromRelease {
         }
         Write-Log 'STEP' "正在下载（Gitee Release 资产）：$($asset.name)"
 
-        # 下载带进度条（Invoke-WebDownload 内部对下载做流式读 + Write-Progress），
+        # 下载带底部进度行（Invoke-WebDownload 内部流式读 + 在当前输出位置就地刷新一行），
         # 发布包可能较大且不同网络速度差异大，超时放宽到 30 分钟。
         Invoke-WebDownload -Url $asset.browser_download_url -Destination $Destination -Name "下载发布包"
 
