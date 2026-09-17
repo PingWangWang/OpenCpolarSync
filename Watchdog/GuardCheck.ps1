@@ -78,19 +78,41 @@ try {
     $mutex = New-Object System.Threading.Mutex($false, $MutexName, [ref]$createdNew)
 
     if ($createdNew) {
-        # Guard is NOT running — attempt restart
-        Write-WatchdogLog -Level "RESTART" -Message "$GuardName Guard 不在运行，正在尝试拉起..."
+        # Mutex 显示 Guard 不在，但「创建 Mutex → 拉起 Guard」之间存在竞态窗口：
+        # Guard 进程已经起来、还没来得及 WaitOne 时，下一次 tick 同样会看到
+        # createdNew=$true，于是又拉起一个 —— 结果就是多个 Guard 实例。这里再加
+        # 一道进程级检查兜住它：命令行里带该 Guard 脚本路径的进程已存在就不拉。
+        $existingGuardPid = $null
+        try {
+            $procs = Get-CimInstance Win32_Process `
+                -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction Stop
+            foreach ($p in @($procs)) {
+                if ("$($p.CommandLine)" -like "*$GuardScriptPath*") {
+                    $existingGuardPid = [int]$p.ProcessId
+                    break
+                }
+            }
+        } catch {
+            # 拿不到 CIM（权限/精简系统）时退化为仅用 Mutex 判断，不阻断保活
+        }
 
-        $proc = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList "-ExecutionPolicy Bypass -File `"$GuardScriptPath`"" `
-            -WindowStyle Hidden `
-            -PassThru `
-            -ErrorAction SilentlyContinue
-
-        if ($proc -and $proc.Id -gt 0) {
-            Write-WatchdogLog -Level "RESTART" -Message "$GuardName Guard 已拉起 (PID=$($proc.Id))"
+        if ($existingGuardPid) {
+            Write-WatchdogLog -Level "INFO" -Message "$GuardName Guard 进程已存在 (PID=$existingGuardPid)，跳过拉起"
         } else {
-            Write-WatchdogLog -Level "ERROR" -Message "$GuardName Guard 拉起失败"
+            # Guard is NOT running — attempt restart
+            Write-WatchdogLog -Level "RESTART" -Message "$GuardName Guard 不在运行，正在尝试拉起..."
+
+            $proc = Start-Process -FilePath "powershell.exe" `
+                -ArgumentList "-ExecutionPolicy Bypass -File `"$GuardScriptPath`"" `
+                -WindowStyle Hidden `
+                -PassThru `
+                -ErrorAction SilentlyContinue
+
+            if ($proc -and $proc.Id -gt 0) {
+                Write-WatchdogLog -Level "RESTART" -Message "$GuardName Guard 已拉起 (PID=$($proc.Id))"
+            } else {
+                Write-WatchdogLog -Level "ERROR" -Message "$GuardName Guard 拉起失败"
+            }
         }
     } else {
         # Guard is alive — nothing to do

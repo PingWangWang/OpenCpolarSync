@@ -44,6 +44,7 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 
 > 💡 部署完成后会自动在**桌面**创建「**OpenCpolarSync 配置向导**」快捷方式（已带「以管理员身份运行」标志）。
 > 以后要改配置，**双击它即可**重新打开向导，不必再执行上面的命令。
+> 向导启动后会先询问操作类型（1 安装/更新、2 卸载），所以**卸载也能从这里走**，无需再敲命令。
 > 不需要可用 `-SkipShortcut` 跳过创建。
 
 **备用方式（Gitee raw 直链）：**
@@ -123,6 +124,8 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 | `-SkipTunnel` | 跳过 Cpolar 隧道配置 |
 | `-SkipWatchdog` | 跳过 Watchdog 计划任务注册 |
 | `-SkipShortcut` | 跳过在桌面创建「配置向导」快捷方式 |
+| `-NoMenu` | 不问「安装 / 卸载」，直接进入安装流程（由 `bootstrap-core.ps1` 自动传入，避免重复询问） |
+| `-NoBrowser` | 不自动打开 Openlist / Cpolar 网页 |
 | `-DryRun` | 演练模式 |
 
 ### 无人值守部署示例
@@ -140,7 +143,8 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 
 ## 🔧 部署流程说明
 
-一键部署自动完成以下步骤：
+一键部署在正式阶段开始前，会先做一次**运行状态检查**（清点 Cpolar / Openlist / Guard 实例数），
+然后自动完成以下步骤：
 
 | 阶段 | 动作 |
 |------|------|
@@ -152,13 +156,25 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 | 6 | 注册 Watchdog S4U 计划任务，拉起两个守护进程 |
 | 7 | 在桌面创建「OpenCpolarSync 配置向导」快捷方式（以管理员身份运行） |
 
-> 阶段 7 的快捷方式是后续**改配置的入口**：双击即可重新运行本向导（会载入现有配置作为默认值）。
-> 卸载时由 `uninstall.ps1` 一并删除。
+> 阶段 7 的快捷方式是后续**改配置 / 卸载的入口**：双击即可重新运行本向导（会载入现有配置作为默认值），
+> 向导启动后可选择「安装 / 更新」或「卸载」。
+> 卸载时由 `uninstall.ps1` 一并删除该快捷方式。
+
+> 🖥️ 部署收尾会自动打开 **Openlist**（`http://localhost:5244`）与 **Cpolar Web**（`http://localhost:9200`）
+> 两个页面：前者用于完成存储挂载，后者用于确认隧道是否在线。
+> 不想自动打开可加 `-NoBrowser`。
+
+> ℹ️ 首次配置时「要监控的隧道名」默认为**空**，不会预填任何隧道名——此时会跳过 cpolar.yml 写入。
+> 需要监控时，重新双击向导补填，或直接修改配置文件里的 `selectedTunnelNames`（运行中改动会自动生效）。
+
+> 🔁 **可以重复运行**：向导每次启动都会先做一次「运行状态检查」，清点 Cpolar / Openlist / Guard 的实例数量。
+> 已在运行的组件不会被重复拉起——例如 Cpolar 已在运行时不再执行 `cpolar.exe authtoken`
+> （该命令会额外拉起一个 cpolar 实例）。因此反复执行向导是安全的，不会攒出多份进程。
 
 ### 仍需手动完成的一步
 
-**Openlist 存储挂载**需要在 Web 界面完成：
-1. 浏览器打开 `http://localhost:5244`
+**Openlist 存储挂载**需要在 Web 界面完成（该页面部署结束时会自动打开）：
+1. 浏览器打开 `http://localhost:5244`（若未自动打开则手动访问）
 2. 登录账号 `admin`，密码为部署时设置的 Openlist 密码
 3. 进入「存储」→「添加」，挂载本地目录或网盘
 
@@ -278,6 +294,15 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 
 不会。配置文件保存在 `%LOCALAPPDATA%\OpenCpolarSync\config`，位于程序目录之外。
 
+### Q: 反复运行向导会产生多个 cpolar / openlist 进程吗？
+
+不会（v1.1.15 起）。向导启动时会先做「运行状态检查」：已在运行的组件不会被重复拉起；
+本工具自己的 Guard 进程若出现重复，还会自动去重（保留启动最早的那个）。
+
+如果检查结果里 Cpolar / Openlist 显示 **≥2 个实例**，说明或是旧版本遗留的进程，或是该程序
+自身启动了多份。向导此时只告警并给建议，**不会替你结束第三方进程**——确认后可在「任务管理器」
+里保留一个、结束其余，再重新运行向导即可。
+
 ---
 
 ## 前置条件
@@ -296,6 +321,156 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 2. 升级程序不会丢失配置
 3. 卸载时可选是否删除配置和 Cpolar 客户端
 4. 脚本编码：`bootstrap.ps1` 为纯 ASCII，`setup.ps1` / `bootstrap-core.ps1` / `uninstall.ps1` 为 UTF-8 with BOM
+
+---
+
+## 🛠️ 维护者指南：修改与发布流程
+
+> 本节面向**项目维护者**，说明「改代码 → 推送 → 发布 → 验证」的完整手工流程。
+> 普通使用者无需阅读。
+
+### 一条铁律
+
+**`main` 分支 = `vX.Y.Z` tag = Gitee Release 资产，三者必须指向同一个提交。**
+
+原因是 Gitee 对匿名请求的分发限制（实测，无 Cookie、无登录）：
+
+| 端点 | 结果 |
+|------|------|
+| `/repository/archive/main.zip` | HTTP 200，但返回**登录页 HTML**，不是 zip |
+| `/archive/refs/tags/<tag>.zip` | 同上（返回 HTML） |
+| `/raw/main/<小文件>` | ✅ 可用 |
+| `/raw/main/<大文件，如 71MB 的 openlist.zip>` | ❌ 403 |
+| `/releases/download/<tag>/<资产>` | ✅ **唯一可靠的匿名分发通道** |
+
+两个关键推论：
+
+1. **发布包必须作为 Release 资产上传**，不能用源码归档 URL 当下载源，也没有可用的回退源。
+2. **tag 决定资产 URL**——tag 没前移，用户下载到的就还是旧代码。
+
+### 版本号需要同步的位置
+
+改版本号时这几处要一起改，漏一处就会出现「代码是新的、用户下载到的是旧的」：
+
+| 位置 | 内容 |
+|------|------|
+| `bootstrap.ps1` | `$coreUrl` 里硬编码的 tag：`.../releases/download/v1.1.15/bootstrap-core.ps1` |
+| `build_release_zip.ps1` | `$Tag` 默认值 |
+| `publish_gitee_release.ps1` | `$Tag` 默认值 |
+| `README.md` | 徽标版本号 + 各条安装命令 URL 里的 tag |
+
+### 完整流程（7 步）
+
+#### ① 改代码
+
+按项目编码约定修改（见本节末尾「编码约定」）。
+
+#### ② 本地自测
+
+```powershell
+# 演练模式：只打印计划、不下载不解压不执行
+.\setup.ps1 -DryRun -Silent -NoElevate -NoBrowser
+
+# 引导器演练（含下载/解压逻辑，但不调用 setup.ps1）
+.\bootstrap-core.ps1 -DryRun
+```
+
+#### ③ 提交（代码 + 文档一起提交）
+
+> ⚠️ **顺序很关键。** 发布包由 `git archive HEAD` 生成，**HEAD 里有什么就打什么**。
+> 如果先构建发布包、之后再补文档提交，包里就是旧文档——这种漂移几乎不会被发现，代价却是多跑一次 75MB 上传。
+> 所以：**一次把代码和文档都改完、都提交完，最后只跑一次发布。**
+
+```powershell
+git add -A
+git commit -m "feat(SCOPE): 变更说明"     # 提交规范见项目约定
+```
+
+#### ④ 推送到 Gitee
+
+```powershell
+git push origin main
+```
+
+#### ⑤ 前移 tag 到本次发布提交
+
+```powershell
+$commit = (git rev-parse HEAD).Trim()          # 或用 git log --oneline -1 看提交号
+
+git tag -f v1.1.15 $commit
+git push -f origin refs/tags/v1.1.15
+
+# 必须核实远端 tag 真的指向新提交（git tag 只是本地的，不算数）
+git ls-remote --tags --refs origin v1.1.15
+```
+
+#### ⑥ 发布（构建发布包 + 上传资产）
+
+```powershell
+# 令牌只放环境变量，绝不写进脚本、绝不提交
+$env:GITEE_TOKEN = '<你的 Gitee 私人令牌>'
+
+.\publish_gitee_release.ps1 -Tag v1.1.15
+```
+
+脚本自动完成：`git archive` 构建 `%TEMP%\OpenCpolarSync_v1.1.15.zip`（约 **75MB**）→ 建/复用 Release → 上传三个资产（`bootstrap.ps1`、`bootstrap-core.ps1`、发布包）。
+
+- 上传 75MB 需几分钟，属正常，建议后台跑并看脚本自己输出的 `SCRIPT_RC=0`。
+- 构建失败时脚本**直接中止**，不会发出残缺 Release（这点是刻意的，见「常见坑」）。
+- 只想重传已有 zip、不重新构建，可加 `-SkipZip`。
+
+#### ⑦ 匿名验证（**别跳**）
+
+```powershell
+# a) latest 指向哪个版本、有哪些资产
+Invoke-RestMethod 'https://gitee.com/api/v5/repos/pingwang1994/OpenCpolarSync/releases/latest' | Select-Object tag_name
+
+# b) 匿名下载发布包，确认是真 zip + 大小约 75MB
+irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/OpenCpolarSync_v1.1.15.zip `
+    -OutFile $env:TEMP\check.zip
+
+# c) 校验魔数：合法 ZIP 以 PK 开头（十六进制 50 4B 03 04）
+$fs = [System.IO.File]::OpenRead("$env:TEMP\check.zip")
+$b = New-Object byte[] 4; [void]$fs.Read($b, 0, 4); $fs.Close()
+($b | ForEach-Object { $_.ToString('X2') }) -join ' '     # 期望：50 4B 03 04
+```
+
+> ⚠️ **HTTP 200 不等于拿到了真 zip**——Gitee 返回的登录页 HTML 也是 200。必须确认魔数。
+> 更进一步，可以解压发布包后确认**关键脚本确实是新版**（例如 grep 新增的函数名），而不只是「下到的是个 zip」。
+
+### 常见坑
+
+| 现象 | 原因 / 处理 |
+|------|------|
+| 上传报 404，日志里 URL 带两个 id（如 `.../attach_files/3215277 3215431`） | PowerShell 7 的 `Invoke-RestMethod` 把 JSON 数组当单个对象，不展开。项目脚本内已统一改为 `foreach` 逐项处理；自己另写脚本时要注意 |
+| 一键安装报「下载内容不是有效的 ZIP 压缩包」 | 多数是 Release 里**没有**发布包资产，安装脚本回退去取源码归档（拿到登录页 HTML）。检查第 ⑥ 步是否成功 |
+| 查询 Release 返回 HTTP 200 但内容为空 | Gitee 在 tag 不存在时返回 `null` 而非 404 → 必须判 `id` 是否存在，`try/catch` 抓不到 |
+| 新建 Release 报 400 Bad Request | tag 尚不存在时必须带 `target_commitish` |
+| PowerShell 脚本在 5.1 下中文乱码 | 见下「编码约定」 |
+| `Setup.ps1` 语法/中文异常 | 用 UTF-8 with BOM 保存；`param()` 必须放文件最前，帮助注释块移到其后 |
+
+### 编码约定（务必保持）
+
+| 文件 | 编码 / 换行 |
+|------|------|
+| `bootstrap.ps1` | **纯 ASCII、无 BOM**（`irm \| iex` 场景下 PS 5.1 按 ANSI 解码 HTTP 文本，中文会乱码） |
+| `bootstrap-core.ps1` / `setup.ps1` / `uninstall.ps1` | **UTF-8 with BOM + CRLF** |
+| `README.md` 及其他 `.md` / `.json` | **无 BOM + CRLF** |
+
+### 令牌安全
+
+- 令牌只通过 `$env:GITEE_TOKEN` / `-Token` / `-TokenFile` 传入，**绝不写进脚本、绝不提交到仓库**。
+- 一旦在聊天、日志或截图里出现过，**立即到 Gitee → 设置 → 私人令牌 作废并重新生成**。
+
+### 发布检查清单
+
+- [ ] 代码 + 文档一起改完 → 提交 → 推送
+- [ ] 版本号 4 处同步（`bootstrap.ps1` / `build_release_zip.ps1` / `publish_gitee_release.ps1` / `README.md`）
+- [ ] tag 前移，且 `git ls-remote --tags --refs` 核实远端已更新
+- [ ] `publish_gitee_release.ps1` 跑完且 `SCRIPT_RC=0`
+- [ ] 匿名 `releases/latest` 能取到发布包资产
+- [ ] 匿名下载为真 zip（魔数 `50 4B 03 04`，约 75MB）
+- [ ] 收敛确认：`main` = tag = Release 资产，同一提交
 
 ---
 

@@ -42,19 +42,50 @@ try {
     }
 } catch { }
 
+# ============================================================
+# Function: Write-Log — 输出带级别符号与着色的中文日志
+# 符号限定在 GB2312 字符集内（√ × → · !），保证 GBK 控制台可正常显示。
+# ============================================================
 function Write-Log {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('INFO', 'STEP', 'OK', 'WARN', 'ERROR')][string]$Level,
         [Parameter(Mandatory = $true)][string]$Message
     )
-    $color = switch ($Level) {
-        'OK'    { 'Green' }
-        'WARN'  { 'Yellow' }
-        'ERROR' { 'Red' }
-        'STEP'  { 'Cyan' }
-        default { 'Gray' }
+    $style = switch ($Level) {
+        'OK'    { @{ Mark = '√'; Color = 'Green' } }
+        'WARN'  { @{ Mark = '!'; Color = 'Yellow' } }
+        'ERROR' { @{ Mark = '×'; Color = 'Red' } }
+        'STEP'  { @{ Mark = '→'; Color = 'Cyan' } }
+        default { @{ Mark = '·'; Color = 'DarkGray' } }
     }
-    Write-Host "[$Level] $Message" -ForegroundColor $color
+    Write-Host ("   {0} {1}" -f $style.Mark, $Message) -ForegroundColor $style.Color
+}
+
+# ============================================================
+# Function: Write-Rule — 输出横向分隔线（只用 GB2312 内的制表符）
+# ============================================================
+function Write-Rule {
+    param(
+        [int]$Width = 58,
+        [ValidateSet('Single', 'Double')][string]$Style = 'Single',
+        [string]$Color = 'DarkCyan'
+    )
+    $ch = if ($Style -eq 'Double') { '═' } else { '─' }
+    Write-Host ('  ' + ($ch * $Width)) -ForegroundColor $Color
+}
+
+# ============================================================
+# Function: Write-Stage — 打印阶段分隔标题
+# ============================================================
+function Write-Stage {
+    param(
+        [Parameter(Mandatory = $true)][int]$Number,
+        [Parameter(Mandatory = $true)][string]$Title,
+        [int]$Total = 6
+    )
+    Write-Host ''
+    Write-Rule -Width 58
+    Write-Host ("   阶段 $Number/$Total  ·  $Title") -ForegroundColor Cyan
 }
 
 function Confirm-Action {
@@ -70,9 +101,10 @@ function Confirm-Action {
 # 主流程
 # ============================================================
 # 不清屏，直接在当前命令行输出
-Write-Host '==========================================' -ForegroundColor Cyan
-Write-Host ' OpenCpolarSync 卸载向导' -ForegroundColor Cyan
-Write-Host '==========================================' -ForegroundColor Cyan
+Write-Host ''
+Write-Rule -Width 58 -Style Double
+Write-Host '    OpenCpolarSync  ·  卸载向导' -ForegroundColor Cyan
+Write-Rule -Width 58 -Style Double
 
 if (-not $InstallDir) {
     $InstallDir = Join-Path $env:LOCALAPPDATA 'OpenCpolarSync'
@@ -95,7 +127,7 @@ if (-not (Test-Path $appDir)) {
 Write-Host ''
 
 # --- 阶段 1：停止进程 ---------------------------------------------------------
-Write-Host '--- 阶段 1：停止运行中的进程 ---' -ForegroundColor Cyan
+Write-Stage -Number 1 -Title '停止运行中的进程'
 
 $processes = @('openlist', 'cpolar', 'powershell')
 $stopped = @()
@@ -138,7 +170,7 @@ if ($stopped.Count -gt 0) {
 
 # --- 阶段 2：移除 Watchdog 计划任务 -------------------------------------------
 Write-Host ''
-Write-Host '--- 阶段 2：移除 Watchdog 计划任务 ---' -ForegroundColor Cyan
+Write-Stage -Number 2 -Title '移除 Watchdog 计划任务'
 
 $watchdogMgr = Join-Path $appDir 'Watchdog\WatchdogManager.bat'
 if (Test-Path $watchdogMgr) {
@@ -179,7 +211,7 @@ if (Test-Path $runKey) {
 
 # --- 阶段 3：删除程序目录 -----------------------------------------------------
 Write-Host ''
-Write-Host '--- 阶段 3：删除程序文件 ---' -ForegroundColor Cyan
+Write-Stage -Number 3 -Title '删除程序文件'
 
 if (Test-Path $appDir) {
     Write-Log 'STEP' "删除程序目录：$appDir"
@@ -217,7 +249,7 @@ if (Test-Path $appDir) {
 
 # --- 阶段 4：桌面快捷方式 -----------------------------------------------------
 Write-Host ''
-Write-Host '--- 阶段 4：桌面快捷方式 ---' -ForegroundColor Cyan
+Write-Stage -Number 4 -Title '桌面快捷方式'
 
 # 名称需与 setup.ps1 中 New-DesktopShortcut 的 $Name 保持一致
 $desktopPath  = [Environment]::GetFolderPath('Desktop')
@@ -236,7 +268,7 @@ if ($shortcutPath -and (Test-Path $shortcutPath)) {
 
 # --- 阶段 5：配置目录（可选） -------------------------------------------------
 Write-Host ''
-Write-Host '--- 阶段 5：配置文件 ---' -ForegroundColor Cyan
+Write-Stage -Number 5 -Title '配置文件'
 
 $doRemoveConfig = if ($Silent) { $RemoveConfig.IsPresent } else { Confirm-Action -Message '是否删除配置文件（config.json、钉钉Webhook、密码等）' -Default $false }
 
@@ -259,7 +291,7 @@ if ($doRemoveConfig) {
 
 # --- 阶段 6：卸载 Cpolar（可选） ----------------------------------------------
 Write-Host ''
-Write-Host '--- 阶段 6：Cpolar 客户端 ---' -ForegroundColor Cyan
+Write-Stage -Number 6 -Title 'Cpolar 客户端'
 
 $cpolarInstalled = $false
 try {
@@ -298,13 +330,13 @@ if ($cpolarInstalled) {
 
 # --- 完成 ---------------------------------------------------------------------
 Write-Host ''
-Write-Host '==========================================' -ForegroundColor Cyan
-Write-Host ' 卸载完成' -ForegroundColor Green
-Write-Host '==========================================' -ForegroundColor Cyan
-Write-Host "  程序目录：$appDir $(if (Test-Path $appDir) { '(仍存在，可能有文件被占用)' } else { '(已删除)' })"
-Write-Host "  配置目录：$configDir $(if (Test-Path $configDir) { '(已保留)' } else { '(已删除)' })"
+Write-Rule -Width 58 -Style Double
+Write-Host '    卸载完成' -ForegroundColor Green
+Write-Rule -Width 58 -Style Double
+Write-Host ("   程序目录    " + $appDir + " " + $(if (Test-Path $appDir) { '（仍存在，可能有文件被占用）' } else { '（已删除）' }))
+Write-Host ("   配置目录    " + $configDir + " " + $(if (Test-Path $configDir) { '（已保留）' } else { '（已删除）' }))
 Write-Host ''
-Write-Host '  如有残留文件被占用，重启电脑后可手动删除上述目录。' -ForegroundColor Gray
+Write-Host '   如有残留文件被占用，重启电脑后可手动删除上述目录。' -ForegroundColor DarkGray
 
 if (-not $Silent) {
     Write-Host ''

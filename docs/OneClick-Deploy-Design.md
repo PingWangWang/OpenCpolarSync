@@ -415,6 +415,177 @@ $bytes[0x15] = $bytes[0x15] -bor 0x20
 
 ---
 
+### 6.8 交互与观感优化（四项）
+
+真机部署后收到的四条反馈，逐条修复。
+
+#### 6.8.1 输出美化（`setup.ps1` / `bootstrap-core.ps1` / `uninstall.ps1`）
+
+**问题**：原先只有 `[INFO] / [OK]` 这种方括号前缀 + `====` 分隔线，层级感弱、配色也偏素。
+
+**改动**：三个脚本统一视觉语言。
+
+| 元素 | 改前 | 改后 |
+|---|---|---|
+| 横幅 | `====` 三条 | `════` 双线规则 + 主标题 + 副标题（`Write-Banner`） |
+| 阶段 | `--- 阶段 1：xxx ---` | 细线规则 + `阶段 1/7  ·  xxx`（`Write-Stage`，带总数） |
+| 日志 | `[OK] 消息` | 级别符号 + 消息（`√ / ! / × / → / · / ~`） |
+| 摘要 | `==== 部署结果摘要 ====` + 手动对齐 | `════` 标题栏 + 两列对齐 + 收尾规则 |
+
+**关键约束：所有符号必须落在 GB2312 字符集内。** Windows PowerShell 5.1 的控制台默认是系统 ANSI 代码页（简体中文为 **GBK/936**），GB2312 之外的字符（如 `✔` U+2714、`✖` U+2716、`⚠` U+26A0、`╭` U+256D）会显示成方块或问号。因此刻意选用：
+
+| 用途 | 字符 | 码位 | GB2312 |
+|---|---|---|---|
+| 成功 | `√` | U+221A | ✓ |
+| 失败 | `×` | U+00D7 | ✓ |
+| 警告 / 步骤 / 信息 | `!` `→` `·` | ASCII / U+2192 / U+00B7 | ✓ |
+| 制表（单/双线） | `─` `═` | U+2500 / U+2550 | ✓ |
+
+**故意不做右边框**：CJK 是双宽字符，要画右侧竖线就得按显示宽度补齐（汉字算 2 列），维护成本和出错概率都高。改用「左对齐 + 整行规则」即可获得同样的分组观感。
+
+#### 6.8.2 配置向导增加卸载入口
+
+**需求**：从桌面快捷方式打开的向导，也应该能选择卸载。
+
+**实现**：`setup.ps1`
+
+1. 新增开关 `-NoMenu`，并在主流程序列**解析路径之后、提权之前**插入操作菜单（1 安装/更新、2 卸载，默认 1）。
+2. 显示条件：**非** `-Silent`、**非** `-DryRun`、**非** `-NoMenu`。即只在「独立交互运行」（双击快捷方式）时出现。
+3. 选 2 时：由 `$installRoot = Split-Path -Parent $ConfigDir` 反推安装根目录（即 `%LOCALAPPDATA%\OpenCpolarSync`，与 `uninstall.ps1` 默认值一致），优先调用 `$RootDir\uninstall.ps1`，找不到再回退到 `$installRoot\app\uninstall.ps1`；已是管理员直接调用，否则经 `RunAs` 提权（停进程、删计划任务同样需要管理员）。
+4. `bootstrap-core.ps1` 调用 setup 时**固定传 `$setupParams['NoMenu'] = $true`**——引导器自己已经问过「安装 / 卸载」，不传就会弹出两层重复菜单。
+5. 自动提权重启自身时，参数列表同时追加 `-NoElevate -NoMenu`：用户已经选过操作类型，重启后不能再问一次。
+
+#### 6.8.3 监控隧道名首次配置默认为空
+
+**问题**：`$defaultTunnel = 'OpenListHC'` 会在用户什么都没建的时候预填一个具体隧道名——用户直接回车就接受了，而该隧道并不存在，Guard 随后一直报「隧道未找到」。真机截图里 `部署完成` 段落也确实打印出了 `- OpenListHC`。
+
+**修复**：
+
+- `$defaultTunnel` 改为 `''`。
+- 随之而来的**参数绑定陷阱**：`Invoke-ConfigWizard` 的 `[Parameter(Mandatory=$true)][string]$DefaultTunnel` **拒绝空字符串**，传 `''` 直接抛「无法将参数绑定到参数 DefaultTunnel，因为它是空字符串」并中断整个向导（DryRun 实测在「阶段 3」戛然而止）。必须加 `[AllowEmptyString()]`（同时补 `[AllowNull()]`）。
+- **空数组陷阱**：`@($default)` 在 `$default` 为空串时会得到 `@('')`，最终写出 `selectedTunnelNames: ["",]` 这种无意义配置。修法是三处同时兜底：
+  - Silent 分支：`if ($default) { @($default) } else { @() }`；
+  - 交互分支：用户直接回车且无默认值时给 `@()`；
+  - 向导末尾统一过滤：`@($Values.TunnelNames | Where-Object { $_ -and "$_".Trim() })`；
+  - `New-GuardConfigFile` 序列化前再过滤一次。
+- 阶段 5 增加短路：隧道列表为空时**不写** `cpolar.yml`（写了也只有一个空的 `tunnels:` 段），改为提示「可稍后在配置文件中补充后重跑本向导」。
+- 交互提示补上「（直接回车 = 暂不监控，可稍后在配置文件里补）」。
+
+**验证**：隔离到临时 `-ConfigDir` 实跑一次配置生成，得到 `"selectedTunnelNames": []`（`json.loads` 解析为 `list`，长度为 0），不再是 `[""]`。
+
+#### 6.8.4 收尾同时拉起 Openlist 与 Cpolar 两个网页
+
+**问题**：`Show-FinalChecklist` 只 `Start-Process "http://localhost:$Port"`，只打开了 Openlist；Cpolar Web 只以文字形式提示，用户还得自己复制地址。
+
+**修复**：两个地址都拉起，并给 400ms 间隔——两个地址在同一瞬间交给 shell 时，部分系统上会因争抢默认浏览器实例而只打开一个。`-NoBrowser` / `-DryRun` 分支的提示也同步改为打印两个地址。
+
+**验证**：DryRun 输出 `~ 计划打开浏览器：Openlist http://localhost:5244 ；Cpolar http://localhost:9200`。
+
+#### 6.8.5 四项改动的汇总
+
+| # | 需求 | 涉及文件 | 关键改动 |
+|---|---|---|---|
+| 1 | 输出美化 | `setup.ps1` `bootstrap-core.ps1` `uninstall.ps1` | `Write-Banner` / `Write-Rule` / `Write-Stage` + GB2312 安全的级别符号 |
+| 2 | 向导可选卸载 | `setup.ps1` `bootstrap-core.ps1` | `-NoMenu` 开关、操作菜单、`RunAs` 提权调用 `uninstall.ps1` |
+| 3 | 隧道名默认留空 | `setup.ps1` | `$defaultTunnel=''`、`AllowEmptyString`、三处空数组兜底、阶段 5 短路 |
+| 4 | 双网页拉起 | `setup.ps1` | `Show-FinalChecklist` 打开 Openlist + Cpolar，间隔 400ms |
+
+**验证方式**：四个脚本全部通过 PowerShell AST 语法解析；`setup.ps1 -DryRun -Silent -NoElevate -NoBrowser` 端到端无异常（`SCRIPT_OK`）；配置生成实测写入 `[]`；编码校验三脚本均为 **UTF-8 with BOM + 纯 CRLF**。
+
+> ⚠️ 未验证项（需真机确认）：6.8.2 的**卸载分支**会真实停进程、删计划任务，因此在沙箱内未实际执行，仅做代码复核。真机双击快捷方式后选「2」验证一次：应弹 UAC，随后进入卸载流程并删除桌面快捷方式。
+
+
+---
+
+### 6.9 进程幂等性：「重复运行向导不再重复拉起进程」
+
+**现象**（真机卸载日志）：
+
+```
+--- 阶段 1：停止运行中的进程 ---
+[STEP] 停止进程：openlist (PID=5616)
+[STEP] 停止进程：cpolar (PID=3516)
+[STEP] 停止进程：cpolar (PID=8496)      ← 同一个 cpolar 出现了两个实例
+[STEP] 停止守护进程：powershell (PID=2528)
+[STEP] 停止守护进程：powershell (PID=4036)
+[OK] 已停止 5 个进程，等待文件句柄释放...
+```
+
+用户判断：多次执行配置向导时没有检测进程是否已启动，导致重复拉起。
+
+#### 根因定位（逐个排查可能的拉起源）
+
+| 候选来源 | 结论 |
+|---|---|
+| `setup.ps1` 直接 start cpolar | ❌ 代码里没有 |
+| `CpolarGuard.ps1` | ❌ 只轮询 API，不启动 cpolar |
+| `OpenlistGuard.ps1` → `openlist.exe` | ✅ 会启动，但**已有** `Get-Process` 前置检测 |
+| `Cpolar/AutoStart.bat` | ❌ 只管理 CpolarGuard 的启动文件夹快捷方式 |
+| `WatchdogManager.bat setup` | ❌ 只注册计划任务 |
+| **`Set-CpolarTunnel` → `cpolar.exe authtoken <token>`** | ✅ **正解** |
+
+`Set-CpolarTunnel` 原本无条件执行 `& cpolar.exe authtoken $Token`。而 **cpolar.exe 是常驻客户端**：在 cpolar 已经运行的情况下再执行一次 `authtoken`，会额外拉起一个新实例。于是每跑一次向导就多一个 cpolar 进程——与日志里两个 cpolar PID 完全吻合。
+
+另外 `GuardCheck.ps1` 存在一个**竞态窗口**：它靠「命名 Mutex 是否 createdNew」判断 Guard 是否存活，但「创建 Mutex → `Start-Process` 拉起 Guard」之间有时差；若 Guard 进程已起、还没执行到 `WaitOne`，下一次 tick 仍会看到 `createdNew=$true`，于是再拉起一个。
+
+#### 修复（4 处）
+
+**① `Set-CpolarTunnel`：先检测再调用**（核心）
+
+```powershell
+$runningCpolar = @(Get-ProcessList -Name 'cpolar')
+if ($runningCpolar.Count -gt 0) {
+    Write-Log 'INFO' "Cpolar 已在运行（PID=$($runningCpolar[0].Id)），跳过 authtoken 命令注册（yml 已写好，重启 Cpolar 后生效）"
+    return $true
+}
+```
+
+`cpolar.yml` 本来就由同一个函数手工写入（含 `authtoken:` 段），所以跳过 CLI 不会丢配置，只是生效时机推迟到 cpolar 下次重启。
+
+**② 新增「运行状态检查」预检段**（阶段 1 之前）
+
+每次运行向导都先清点 `cpolar` / `openlist` / 本工具 Guard 的实例数量，0 个记 `未运行`、1 个记 `运行中（PID=…）`、≥2 个记 `WARN … 可能存在重复拉起`。
+
+**③ Guard 进程自动去重**
+
+Guard 是本工具自己的进程，同名出现 2 个一定是错误 → 自动结束多余的，保留启动最早的一个。
+
+**④ `GuardCheck.ps1` 加进程级兜底**
+
+在 Mutex 判定之外再查一次进程：命令行以 `-File` 方式运行且路径等于该 Guard 脚本，则认为已存在，跳过拉起。
+
+#### 关键安全设计：宁可漏检，也不误杀
+
+去重会执行 `Stop-Process -Force`，误判的代价是**结束用户的进程**，因此匹配条件刻意收紧为两条同时满足：
+
+1. 命令行必须含 `-File`（排除 `-Command` 里只是「提到」某文件名的进程）；
+2. 必须匹配 Guard 脚本的**完整路径**（`<RootDir>\Cpolar\CpolarGuard.ps1` 等），不做文件名通配。
+
+只给 `BaseDir` 无法命中时直接返回空数组——**漏检只是少清理一次，误杀却是事故**。
+
+> 这个收紧不是设计时想到的，而是**单测抓出来的**：最初只按文件名子串匹配，测试脚本自身的命令行恰好含 `CpolarGuard.ps1` 字样，于是把自己识别成了 Guard（`count=1` 而非 0）。修正后干净环境下为 0，且真实 Guard 命令行仍能命中。
+
+#### 对第三方进程只报告不处理
+
+`cpolar` / `openlist` 的进程模型不完全可控（例如 cpolar 可能由自身服务拉起、进程数语义未知），所以仅输出告警与处置建议，**不自动结束**。
+
+#### 验证
+
+| 项 | 结果 |
+|---|---|
+| AST 语法解析 | setup.ps1 / GuardCheck.ps1 / OpenlistGuard.ps1 / CpolarGuard.ps1 全部 OK |
+| `Get-ProcessList` 对不存在进程 | 返回空数组（`-is [array]` 为 True），不报错 |
+| `Select-DuplicateProcess` | 2×CpolarGuard + 1×OpenlistGuard → 只挑出晚启动的 1 个；无重复时返回 0；`StartTime` 缺失时按 Id 兜底 |
+| `Write-ProcessStatus` 三档 | 0 → `[INFO] 未运行`；1 → `[OK] 运行中（PID=7）`；2 → `[WARN] 检测到 2 个实例（PID=7, 8）` |
+| 匹配收紧后 | 干净环境下 `Get-ToolProcesses` 返回 0；构造真实 Guard 命令行（含 `-File` + 完整路径）能命中；不同目录的 `CpolarGuard.ps1` 不命中 |
+| DryRun 全流程 | 预检段正常渲染（Cpolar/Openlist/Guard 三行），七阶段无异常 |
+| 真实执行（Silent + 全跳过） | `REAL_OK`，预检与收尾均正常 |
+
+> ⚠️ 未验证项：**「检测到重复后实际结束进程」这一条在沙箱内无法端到端执行**——沙箱拦截了 `Start-Process`（PowerShell 与 Bash 两条路径都拦），无法造出两个真实的 Guard 进程。该分支的逻辑（分组、挑多余、`Stop-Process`）已通过函数级单测覆盖，`Stop-Process` 本身是标准 cmdlet。真机首次运行时可留意预检段是否出现 `已结束多余的 Guard 进程 …`。
+
+
+---
+
 ## 7. 已知限制与待决策项
 
 | # | 事项 | 说明 |

@@ -9,7 +9,11 @@
       4. 配置 Cpolar 内网穿透隧道（写入 cpolar.yml 并注册 authtoken）
       5. 注册 Watchdog 计划任务（S4U）并立即拉起 Cpolar / Openlist 两个 Guard
       6. 在桌面创建「配置向导」快捷方式（以管理员身份运行）——以后双击即可重开本向导
-      7. 打开 Openlist Web 引导完成存储挂载（当前唯一需人工介入的步骤）
+      7. 自动打开 Openlist Web 与 Cpolar Web 两个页面（前者用于完成存储挂载）
+
+    独立运行（如双击桌面快捷方式）时会先询问操作类型：
+      1) 安装 / 更新   2) 卸载
+    由 bootstrap-core.ps1 调用时不会重复询问（引导器已提供同样的菜单）。
 
     设计上遵循「配置与程序分离」：config.json 的主副本存放在
     %LOCALAPPDATA%\OpenCpolarSync\config，每次运行都会同步一份到仓库的
@@ -54,6 +58,9 @@
     跳过在桌面创建「配置向导」快捷方式。
 .PARAMETER NoElevate
     禁止自动请求管理员提权（供自测或已具备权限的场景使用）。
+.PARAMETER NoMenu
+    不询问「安装 / 卸载」操作类型，直接进入安装流程。
+    由 bootstrap-core.ps1 调用时自动传入，避免与引导器的菜单重复询问。
 .EXAMPLE
     .\setup.ps1
     交互式完成全部部署。
@@ -72,6 +79,10 @@
 param(
     [switch]$DryRun,
     [switch]$Silent,
+
+    # bootstrap-core.ps1 调用本脚本时置位：引导器已提供「安装 / 卸载」菜单，
+    # 这里不再重复询问。双击桌面快捷方式独立运行时不带此开关，因此会显示菜单。
+    [switch]$NoMenu,
 
     [string]$RootDir,
     [string]$ConfigDir,
@@ -109,7 +120,9 @@ try {
 } catch { }
 
 # ============================================================
-# Function: Write-Log — 输出带级别着色的中文日志
+# Function: Write-Log — 输出带级别符号与着色的中文日志
+# 符号刻意限定在 GB2312 字符集内（√ × → · ~ !），这样在 Windows
+# PowerShell 5.1 的 GBK 控制台下也能正常显示，不会出现方块或问号。
 # ============================================================
 function Write-Log {
     param(
@@ -121,16 +134,47 @@ function Write-Log {
         [string]$Message
     )
 
-    $color = switch ($Level) {
-        'OK'     { 'Green' }
-        'WARN'   { 'Yellow' }
-        'ERROR'  { 'Red' }
-        'STEP'   { 'Cyan' }
-        'DRYRUN' { 'Magenta' }
-        default  { 'Gray' }
+    $style = switch ($Level) {
+        'OK'     { @{ Mark = '√'; Color = 'Green' } }
+        'WARN'   { @{ Mark = '!'; Color = 'Yellow' } }
+        'ERROR'  { @{ Mark = '×'; Color = 'Red' } }
+        'STEP'   { @{ Mark = '→'; Color = 'Cyan' } }
+        'DRYRUN' { @{ Mark = '~'; Color = 'Magenta' } }
+        default  { @{ Mark = '·'; Color = 'DarkGray' } }
     }
 
-    Write-Host "[$Level] $Message" -ForegroundColor $color
+    Write-Host ("   {0} {1}" -f $style.Mark, $Message) -ForegroundColor $style.Color
+}
+
+# ============================================================
+# Function: Write-Rule — 输出横向分隔线
+# 与 Write-Log 同理，只用 GB2312 内的制表符（─ ═），保证 GBK 控制台可显示。
+# ============================================================
+function Write-Rule {
+    param(
+        [int]$Width = 58,
+        [ValidateSet('Single', 'Double')][string]$Style = 'Single',
+        [string]$Color = 'DarkCyan'
+    )
+
+    $ch = if ($Style -eq 'Double') { '═' } else { '─' }
+    Write-Host ('  ' + ($ch * $Width)) -ForegroundColor $Color
+}
+
+# ============================================================
+# Function: Write-Banner — 输出脚本顶部横幅
+# ============================================================
+function Write-Banner {
+    param(
+        [Parameter(Mandatory = $true)][string]$Title,
+        [string]$Subtitle
+    )
+
+    Write-Host ''
+    Write-Rule -Width 58 -Style Double
+    Write-Host ("    " + $Title) -ForegroundColor Cyan
+    if ($Subtitle) { Write-Host ("    " + $Subtitle) -ForegroundColor DarkGray }
+    Write-Rule -Width 58 -Style Double
 }
 
 # ============================================================
@@ -156,11 +200,13 @@ function Get-SpecialFolder {
 function Write-Stage {
     param(
         [Parameter(Mandatory = $true)][int]$Number,
-        [Parameter(Mandatory = $true)][string]$Title
+        [Parameter(Mandatory = $true)][string]$Title,
+        [int]$Total = 7
     )
 
     Write-Host ''
-    Write-Host "--- 阶段 $Number：$Title ---" -ForegroundColor Cyan
+    Write-Rule -Width 58
+    Write-Host ("   阶段 $Number/$Total  ·  $Title") -ForegroundColor Cyan
 }
 
 # ============================================================
@@ -197,6 +243,125 @@ function Test-IsAdmin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# ============================================================
+# Function: Get-ProcessList — 安全获取同名进程，统一成数组
+# Get-Process 无匹配时返回 $null，直接取 .Count 会报错；此函数总是返回数组，
+# 并统一成 { Id, Label, StartTime } 结构，便于与 Guard 进程一起处理。
+# ============================================================
+function Get-ProcessList {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $result = @()
+    foreach ($p in @(Get-Process -Name $Name -ErrorAction SilentlyContinue)) {
+        $started = $null
+        try { $started = $p.StartTime } catch { }
+        $result += [pscustomobject]@{ Id = [int]$p.Id; Label = $Name; StartTime = $started }
+    }
+    return $result
+}
+
+# ============================================================
+# Function: Get-ToolProcesses — 找出「本工具自己」的 Guard 进程
+#
+# 双重限定，避免误判（误判的后果是 Stop-Process 直接结束用户的进程）：
+#   1) 命令行必须以 -File 方式运行（排除 -Command / -EncodedCommand 里只是
+#      「提到」了某个 Guard 文件名的进程）；
+#   2) 必须匹配 Guard 脚本的**完整路径**（根目录由调用方传入）。
+# 只提供 BaseDir 而不做文件名通配，宁可漏检也不误杀。
+# ============================================================
+function Get-ToolProcesses {
+    param([string]$BaseDir)
+
+    if ($BaseDir) {
+        $candidates = @(
+            (Join-Path $BaseDir 'Cpolar\CpolarGuard.ps1'),
+            (Join-Path $BaseDir 'Openlist\OpenlistGuard.ps1'),
+            (Join-Path $BaseDir 'Watchdog\GuardCheck.ps1')
+        )
+    } else {
+        return @()
+    }
+
+    $result = @()
+    try {
+        $procs = Get-CimInstance Win32_Process `
+            -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction Stop
+    } catch {
+        # 拿不到 CIM（权限/精简系统）时静默降级，不影响主流程
+        return $result
+    }
+
+    foreach ($p in @($procs)) {
+        $cmd = "$($p.CommandLine)"
+        if (-not $cmd) { continue }
+        if ($cmd -notmatch '\-File') { continue }
+        foreach ($c in $candidates) {
+            if ($cmd -like "*$c*") {
+                $result += [pscustomobject]@{
+                    Id        = [int]$p.ProcessId
+                    Label     = (Split-Path $c -Leaf)
+                    StartTime = $p.CreationDate
+                }
+                break
+            }
+        }
+    }
+
+    return $result
+}
+
+# ============================================================
+# Function: Select-DuplicateProcess — 挑出「同名但多于一个」的多余实例
+#
+# 分组键是 Label：CpolarGuard 与 OpenlistGuard 各一个属正常，
+# 同名出现 2 个才是重复。保留启动最早的一个，其余判为多余。
+# ============================================================
+function Select-DuplicateProcess {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()]$Procs)
+
+    $byLabel = @{}
+    foreach ($p in @($Procs)) {
+        $key = "$($p.Label)"
+        if (-not $byLabel.ContainsKey($key)) { $byLabel[$key] = New-Object System.Collections.ArrayList }
+        [void]$byLabel[$key].Add($p)
+    }
+
+    $dupes = @()
+    foreach ($key in $byLabel.Keys) {
+        $group = @($byLabel[$key])
+        if ($group.Count -le 1) { continue }
+        # 取不到启动时间（权限不足）的排到最后，避免把有效实例当多余的处理
+        $sorted = @($group | Sort-Object -Property `
+            @{ Expression = { if ($_.StartTime) { $_.StartTime } else { [datetime]::MaxValue } } }, Id)
+        $dupes += $sorted[1..($sorted.Count - 1)]
+    }
+    return $dupes
+}
+
+# ============================================================
+# Function: Write-ProcessStatus — 输出单个组件的运行状态
+# 0 个 = 未运行；1 个 = 运行中；≥2 个 = 告警（可能重复拉起）
+# ============================================================
+function Write-ProcessStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]$Procs
+    )
+
+    $list = @($Procs)
+    if ($list.Count -eq 0) {
+        Write-Log 'INFO' "$Label：未运行"
+        return
+    }
+
+    $pids = ($list | ForEach-Object { $_.Id }) -join ', '
+    if ($list.Count -eq 1) {
+        Write-Log 'OK' "$Label：运行中（PID=$pids）"
+    } else {
+        Write-Log 'WARN' "$Label：检测到 $($list.Count) 个实例（PID=$pids），可能存在重复拉起"
+    }
 }
 
 # ============================================================
@@ -425,12 +590,23 @@ function Set-CpolarTunnel {
     if (-not $result) { return $false }
 
     if ($DryRun) {
-        Write-Log 'DRYRUN' '计划执行：注册 cpolar authtoken'
+        Write-Log 'DRYRUN' '计划注册 cpolar authtoken（若 cpolar 已在运行则跳过，避免重复拉起实例）'
         return $true
     }
 
-    # authtoken 通过官方命令写入，比直接改 yml 更稳妥
+    # authtoken 通过官方命令写入，比直接改 yml 更稳妥。
+    #
+    # 但 cpolar.exe 是**常驻客户端**：在 cpolar 已经运行的情况下再执行一次
+    # `cpolar.exe authtoken`，会额外拉起一个新的 cpolar 进程——这正是「多次运行
+    # 本向导后出现多个 cpolar 实例」的原因（真机日志里同时存在两个 cpolar PID）。
+    # 因此先检测：已在运行就只保留上面写好的 yml，跳过 CLI 调用。
     if ($Token) {
+        $runningCpolar = @(Get-ProcessList -Name 'cpolar')
+        if ($runningCpolar.Count -gt 0) {
+            Write-Log 'INFO' "Cpolar 已在运行（PID=$($runningCpolar[0].Id)），跳过 authtoken 命令注册（yml 已写好，重启 Cpolar 后生效）"
+            return $true
+        }
+
         $cpolarExe = Get-Command 'cpolar.exe' -ErrorAction SilentlyContinue
         if ($cpolarExe) {
             return (Invoke-Action -Description '注册 cpolar authtoken' -Action {
@@ -469,7 +645,9 @@ function Invoke-ConfigWizard {
         [Parameter(Mandatory = $true)][hashtable]$Values,
         # 首次运行时尚无历史配置，此处允许为 null
         [AllowNull()]$Existing,
-        [Parameter(Mandatory = $true)][string]$DefaultTunnel
+        # 隧道名默认值允许为空字符串（表示不预填任何隧道名）。
+        # 不加 AllowEmptyString 的话，传 '' 会触发参数绑定错误而中断整个向导。
+        [Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][string]$DefaultTunnel
     )
 
     # --- 钉钉 Webhook ---
@@ -545,24 +723,44 @@ function Invoke-ConfigWizard {
     }
 
     # --- 监控隧道名 ---
+    # 首次配置默认留空（不再预填 OpenListHC）：用户此时多半还没在 Cpolar 侧建好隧道，
+    # 预填一个不存在的名字只会让 Guard 一直报「隧道未找到」。
     if (-not $Values.TunnelNames -or $Values.TunnelNames.Count -eq 0) {
         $default = if ($Existing -and $Existing.selectedTunnelNames) {
             $Existing.selectedTunnelNames -join ','
         } else { $DefaultTunnel }
 
         if ($Silent) {
-            $Values.TunnelNames = @($default)
+            $Values.TunnelNames = if ($default) { @($default) } else { @() }
         } else {
             if ($default) {
-                Write-Host "  当前值：$default" -ForegroundColor Gray
+                Write-Host "  当前值：$default" -ForegroundColor DarkGray
+            } else {
+                Write-Host '  当前值：（空）首次配置默认不监控任何隧道' -ForegroundColor DarkGray
             }
             $prompt = '要监控的隧道名，多个用逗号分隔'
-            if ($default) { $prompt += '（回车保留当前值）' }
+            if ($default) {
+                $prompt += '（回车保留当前值）'
+            } else {
+                $prompt += '（直接回车 = 暂不监控，可稍后在配置文件里补）'
+            }
             $input = Read-Host $prompt
-            $Values.TunnelNames = if ($input) {
-                @($input -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-            } else { @($default) }
+            if ($input) {
+                $Values.TunnelNames = @($input -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            } elseif ($default) {
+                $Values.TunnelNames = @($default)
+            } else {
+                $Values.TunnelNames = @()
+            }
         }
+    }
+
+    # 统一兜底：过滤空字符串。否则 $DefaultTunnel 为空且用户直接回车时，
+    # @($default) 会得到 @('')，最终写出 ["",] 这种无意义的隧道名。
+    if ($Values.TunnelNames) {
+        $Values.TunnelNames = @($Values.TunnelNames | Where-Object { $_ -and "$_".Trim() })
+    } else {
+        $Values.TunnelNames = @()
     }
 
     # --- 轮询间隔 ---
@@ -593,7 +791,9 @@ function New-GuardConfigFile {
         [string]$RuntimePath
     )
 
-    $tunnelsJson = ($Values.TunnelNames | ForEach-Object { ConvertTo-JsonEscapedString $_ }) -join ', '
+    # 先过滤空项再序列化：隧道默认留空时这里会得到空数组，写出 selectedTunnelNames: []
+    $tunnelList  = @($Values.TunnelNames | Where-Object { $_ -and "$_".Trim() })
+    $tunnelsJson = ($tunnelList | ForEach-Object { ConvertTo-JsonEscapedString $_ }) -join ', '
 
     # 手工拼接 JSON，保留 _key 形式的中文说明行，与仓库现有配置风格一致
     $json = @"
@@ -750,36 +950,54 @@ function New-DesktopShortcut {
 function Show-FinalChecklist {
     param(
         [Parameter(Mandatory = $true)][int]$Port,
-        [Parameter(Mandatory = $true)][string[]]$Tunnels,
-        [Parameter(Mandatory = $true)][string]$PrimaryConfigPath
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Tunnels,
+        [Parameter(Mandatory = $true)][string]$PrimaryConfigPath,
+        [int]$CpolarWebPort = 9200
     )
 
+    $openlistUrl = "http://localhost:$Port"
+    $cpolarUrl   = "http://localhost:$CpolarWebPort"
+    $hasTunnels  = ($Tunnels -and $Tunnels.Count -gt 0)
+
     Write-Host ''
-    Write-Host '==========================================' -ForegroundColor Cyan
-    Write-Host ' 部署完成 — 还需你手动完成最后一步' -ForegroundColor Cyan
-    Write-Host '==========================================' -ForegroundColor Cyan
+    Write-Rule -Width 58 -Style Double
+    Write-Host '   部署完成  ·  还需你手动完成最后一步' -ForegroundColor Cyan
+    Write-Rule -Width 58 -Style Double
     Write-Host ''
-    Write-Host "1. 浏览器打开 http://localhost:$Port 登录 Openlist" -ForegroundColor White
-    Write-Host '   （账号固定为 admin，密码为部署时设置的 Openlist 登录密码；若未设置则在首次启动日志中查看）' -ForegroundColor Gray
-    Write-Host '2. 进入「存储」→「添加」，挂载你的本地目录或网盘' -ForegroundColor White
-    Write-Host '3. 回到 Cpolar Web（http://localhost:9200）确认以下隧道已在线：' -ForegroundColor White
-    foreach ($t in $Tunnels) { Write-Host "   - $t" -ForegroundColor Gray }
+    Write-Host ("   1. 登录 Openlist        " + $openlistUrl) -ForegroundColor White
+    Write-Host '      账号固定为 admin，密码为部署时设置的 Openlist 登录密码' -ForegroundColor DarkGray
+    Write-Host '      （若未设置，可在首次启动日志中查看随机初始密码）' -ForegroundColor DarkGray
+    Write-Host '   2. 进入「存储」→「添加」，挂载你的本地目录或网盘' -ForegroundColor White
+    if ($hasTunnels) {
+        Write-Host ("   3. 确认隧道已在线      " + $cpolarUrl) -ForegroundColor White
+        foreach ($t in $Tunnels) { Write-Host ("      · " + $t) -ForegroundColor DarkGray }
+    } else {
+        Write-Host ("   3. 查看隧道状态        " + $cpolarUrl) -ForegroundColor White
+        Write-Host '      · 本次未配置监控隧道；需要时在配置文件的 selectedTunnelNames' -ForegroundColor DarkGray
+        Write-Host '        补上隧道名，或重新运行本向导即可' -ForegroundColor DarkGray
+    }
     Write-Host ''
     # 只有快捷方式确实存在时才提示，避免 -SkipShortcut / 创建失败时误导用户
     $scPath = Join-Path (Get-SpecialFolder -VariableName 'Desktop' -FolderName 'Desktop') 'OpenCpolarSync 配置向导.lnk'
     if (Test-Path $scPath) {
-        Write-Host '以后想改配置：双击桌面上的「OpenCpolarSync 配置向导」即可，无需再执行命令。' -ForegroundColor White
+        Write-Host '   以后想改配置：双击桌面「OpenCpolarSync 配置向导」即可，无需再执行命令。' -ForegroundColor White
+        Write-Host '   该向导同时提供「卸载」入口（运行后选择 2）。' -ForegroundColor DarkGray
         Write-Host ''
     }
-    Write-Host "配置文件位置：$PrimaryConfigPath" -ForegroundColor Gray
-    Write-Host '后续修改配置后无需重装，Guard 会在下一个轮询周期自动热加载。' -ForegroundColor Gray
+    Write-Host ("   配置文件：$PrimaryConfigPath") -ForegroundColor DarkGray
+    Write-Host '   后续修改配置无需重装，Guard 会在下一个轮询周期自动热加载。' -ForegroundColor DarkGray
 
     if ($NoBrowser -or $DryRun) {
-        Write-Log 'DRYRUN' "计划打开浏览器：http://localhost:$Port"
+        Write-Log 'DRYRUN' "计划打开浏览器：Openlist $openlistUrl ；Cpolar $cpolarUrl"
         return
     }
 
-    Start-Process "http://localhost:$Port" -ErrorAction SilentlyContinue
+    # Openlist 与 Cpolar 两个页面都拉起：前者用于完成存储挂载，后者用于确认隧道在线。
+    Write-Log 'STEP' '正在打开 Openlist 与 Cpolar 网页...'
+    Start-Process $openlistUrl -ErrorAction SilentlyContinue
+    # 稍作停顿，避免两个地址在同一瞬间抢夺默认浏览器实例导致只打开一个
+    Start-Sleep -Milliseconds 400
+    Start-Process $cpolarUrl -ErrorAction SilentlyContinue
 }
 
 # ============================================================
@@ -787,11 +1005,10 @@ function Show-FinalChecklist {
 # ============================================================
 
 # 不清屏，直接在当前命令行输出
-Write-Host '==========================================' -ForegroundColor Cyan
-Write-Host ' OpenCpolarSync 一键部署向导' -ForegroundColor Cyan
-Write-Host '==========================================' -ForegroundColor Cyan
+Write-Banner -Title 'OpenCpolarSync  ·  一键部署向导' -Subtitle 'Cpolar 隧道监控  ·  Openlist 服务守护  ·  Watchdog 保活'
 if ($DryRun) {
-    Write-Host ' 演练模式：不会安装、注册或写入任何内容' -ForegroundColor Magenta
+    Write-Host ''
+    Write-Host '   演练模式：不会安装、注册或写入任何内容' -ForegroundColor Magenta
 }
 
 # --- 路径解析 -------------------------------------------------
@@ -816,6 +1033,50 @@ $primaryConfig = Join-Path $ConfigDir 'config.json'
 Write-Log 'INFO' "仓库目录：$RootDir"
 Write-Log 'INFO' "配置目录：$ConfigDir"
 
+# --- 操作选择：安装 / 卸载 ------------------------------------
+# 仅在「独立交互运行」（如双击桌面快捷方式）时询问：
+#   -Silent 无人值守、-DryRun 演练、-NoMenu（由引导器传入）一律跳过。
+# bootstrap-core.ps1 已提供同样的菜单，传 -NoMenu 可避免两层重复询问。
+if (-not $Silent -and -not $DryRun -and -not $NoMenu) {
+    Write-Host ''
+    Write-Host '   请选择操作：' -ForegroundColor White
+    Write-Host '     1. 安装 / 更新 OpenCpolarSync' -ForegroundColor White
+    Write-Host '     2. 卸载 OpenCpolarSync' -ForegroundColor White
+    Write-Host ''
+    $choice = Read-Host '   请输入序号 (1/2) [默认 1]'
+
+    if ($choice -eq '2') {
+        Write-Host ''
+        Write-Rule -Width 58
+        Write-Host '   卸载 OpenCpolarSync' -ForegroundColor Cyan
+
+        # 安装根目录 = 配置目录的上一层，即 %LOCALAPPDATA%\OpenCpolarSync
+        $installRoot = Split-Path -Parent $ConfigDir
+        $uninstallPath = Join-Path $RootDir 'uninstall.ps1'
+        if (-not (Test-Path $uninstallPath)) {
+            # 兜底：本脚本被单独复制到别处时，回到已安装目录里找
+            $uninstallPath = Join-Path $installRoot 'app\uninstall.ps1'
+        }
+        if (-not (Test-Path $uninstallPath)) {
+            Write-Log 'ERROR' "未找到 uninstall.ps1，无法卸载（已查找 $RootDir 与 $installRoot\app）"
+            exit 1
+        }
+
+        Write-Log 'STEP' "调用卸载脚本：$uninstallPath"
+        # 卸载同样需要管理员权限（停进程、删计划任务），未提权时经 RunAs 拉起
+        if (Test-IsAdmin) {
+            & $uninstallPath -InstallDir $installRoot
+        } else {
+            Start-Process 'powershell.exe' -Verb RunAs -ArgumentList @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit',
+                '-File', "`"$uninstallPath`"",
+                '-InstallDir', "`"$installRoot`""
+            ) -Wait
+        }
+        exit 0
+    }
+}
+
 # --- 权限检查与自动提权 ---------------------------------------
 # 注册计划任务与安装 msi 都需要管理员权限。未提权时自动以管理员重启自身，
 # 并透传全部参数；-NoElevate 用于自测或已具备权限的场景。
@@ -835,10 +1096,61 @@ if ($needsAdmin -and -not (Test-IsAdmin) -and -not $NoElevate -and -not $DryRun)
             $argList += "`"$($kv.Value)`""
         }
     }
+    # 提权重启后不能再弹一次操作菜单（用户已经选过了）；-NoElevate 防止二次提权死循环。
     $argList += '-NoElevate'
+    $argList += '-NoMenu'
 
     Start-Process 'powershell.exe' -Verb RunAs -ArgumentList $argList -Wait
     exit 0
+}
+
+# --- 运行状态检查（幂等性预检） --------------------------------
+# 多次运行本向导时必须能识别「已经启动过」的组件，否则会重复拉起进程。
+# 本工具的 Guard 进程能通过命令行精确识别，重复即为错误 → 自动去重；
+# cpolar / openlist 属于第三方进程，这里只报告数量，不擅自结束。
+Write-Host ''
+Write-Rule -Width 58
+Write-Host '   运行状态检查' -ForegroundColor Cyan
+
+$cpolarProcs   = @(Get-ProcessList -Name 'cpolar')
+$openlistProcs = @(Get-ProcessList -Name 'openlist')
+$guardProcs    = @(Get-ToolProcesses -BaseDir $RootDir)
+
+Write-ProcessStatus -Label 'Cpolar'   -Procs $cpolarProcs
+Write-ProcessStatus -Label 'Openlist' -Procs $openlistProcs
+
+# Guard 按脚本名分组：CpolarGuard + OpenlistGuard 各一个属正常，同名 2 个才是异常
+if ($guardProcs.Count -eq 0) {
+    Write-Log 'INFO' 'Guard：未运行'
+} else {
+    foreach ($g in ($guardProcs | Group-Object -Property Label | Sort-Object Name)) {
+        Write-ProcessStatus -Label ("Guard（" + $g.Name + "）") -Procs $g.Group
+    }
+}
+
+# Guard 是本工具自己的进程，同名重复一定是错误 → 直接去重，保留启动最早的一个
+$dupGuards = @(Select-DuplicateProcess -Procs $guardProcs)
+if ($dupGuards.Count -gt 0) {
+    if ($DryRun) {
+        Write-Log 'DRYRUN' "计划结束 $($dupGuards.Count) 个多余的 Guard 进程（PID=$(($dupGuards | ForEach-Object { $_.Id }) -join ', ')）"
+    } else {
+        foreach ($d in $dupGuards) {
+            try {
+                Stop-Process -Id $d.Id -Force -ErrorAction Stop
+                Write-Log 'OK' "已结束多余的 Guard 进程 $($d.Label)（PID=$($d.Id)）"
+            } catch {
+                Write-Log 'WARN' "结束 $($d.Label)（PID=$($d.Id)）失败：$($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+# 第三方进程重复时只给建议，不动手：cpolar / openlist 的进程模型不完全可控
+if ($cpolarProcs.Count -gt 1) {
+    Write-Log 'WARN' 'Cpolar 存在多个实例，可能互相抢占 9200 端口；确认后可手动结束多余实例'
+}
+if ($openlistProcs.Count -gt 1) {
+    Write-Log 'WARN' 'Openlist 存在多个实例，可能互相抢占 5244 端口；确认后可手动结束多余实例'
 }
 
 # --- 阶段 1：Cpolar 安装 --------------------------------------
@@ -865,7 +1177,8 @@ Write-Stage -Number 3 -Title '配置收集'
 $existing = Read-ExistingConfig -Path $primaryConfig
 if ($existing) { Write-Log 'INFO' '已载入现有配置作为默认值' }
 
-$defaultTunnel = 'OpenListHC'
+# 首次配置的隧道名默认留空：见 Invoke-ConfigWizard 中的说明。
+$defaultTunnel = ''
 $values = @{
     WebhookUrl     = $WebhookUrl
     CpolarUser     = $CpolarUser
@@ -901,6 +1214,9 @@ if (-not $SkipOpenlist) {
 Write-Stage -Number 5 -Title 'Cpolar 内网穿透隧道'
 if ($SkipTunnel) {
     Write-Log 'INFO' '已指定 -SkipTunnel，跳过'
+} elseif (-not $values.TunnelNames -or $values.TunnelNames.Count -eq 0) {
+    # 首次配置默认留空，此时不必写 cpolar.yml（写了也是空的 tunnels 段）
+    Write-Log 'INFO' '未配置监控隧道，跳过隧道写入（可稍后在配置文件中补充后重跑本向导）'
 } else {
     [void](Set-CpolarTunnel -Tunnels $values.TunnelNames -Port $OpenlistPort -TunnelRegion $Region -Token $AuthToken)
 }
@@ -927,7 +1243,9 @@ if ($SkipShortcut) {
 }
 
 # --- 收尾引导 -------------------------------------------------
-Show-FinalChecklist -Port $OpenlistPort -Tunnels $values.TunnelNames -PrimaryConfigPath $primaryConfig
+Show-FinalChecklist -Port $OpenlistPort -Tunnels $values.TunnelNames -PrimaryConfigPath $primaryConfig -CpolarWebPort 9200
 
 Write-Host ''
-Write-Log 'OK' '全部阶段执行完毕'
+Write-Rule -Width 58 -Style Double
+Write-Log 'OK' '部署向导执行完毕'
+Write-Rule -Width 58 -Style Double

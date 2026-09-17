@@ -90,27 +90,75 @@ try {
 } catch { }
 
 # ============================================================
-# Function: Write-Log — 输出带级别着色的中文日志
+# Function: Write-Log — 输出带级别符号与着色的中文日志
+# 符号刻意限定在 GB2312 字符集内（√ × → · ~ !），保证 Windows
+# PowerShell 5.1 的 GBK 控制台下也能正常显示，不出现方块或问号。
 # ============================================================
 function Write-Log {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('INFO', 'STEP', 'OK', 'WARN', 'ERROR')]
+        [ValidateSet('INFO', 'STEP', 'OK', 'WARN', 'ERROR', 'DRYRUN')]
         [string]$Level,
 
         [Parameter(Mandatory = $true)]
         [string]$Message
     )
 
-    $color = switch ($Level) {
-        'OK'    { 'Green' }
-        'WARN'  { 'Yellow' }
-        'ERROR' { 'Red' }
-        'STEP'  { 'Cyan' }
-        default { 'Gray' }
+    $style = switch ($Level) {
+        'OK'     { @{ Mark = '√'; Color = 'Green' } }
+        'WARN'   { @{ Mark = '!'; Color = 'Yellow' } }
+        'ERROR'  { @{ Mark = '×'; Color = 'Red' } }
+        'STEP'   { @{ Mark = '→'; Color = 'Cyan' } }
+        'DRYRUN' { @{ Mark = '~'; Color = 'Magenta' } }
+        default  { @{ Mark = '·'; Color = 'DarkGray' } }
     }
 
-    Write-Host "[$Level] $Message" -ForegroundColor $color
+    Write-Host ("   {0} {1}" -f $style.Mark, $Message) -ForegroundColor $style.Color
+}
+
+# ============================================================
+# Function: Write-Rule — 输出横向分隔线（只用 GB2312 内的制表符）
+# ============================================================
+function Write-Rule {
+    param(
+        [int]$Width = 58,
+        [ValidateSet('Single', 'Double')][string]$Style = 'Single',
+        [string]$Color = 'DarkCyan'
+    )
+
+    $ch = if ($Style -eq 'Double') { '═' } else { '─' }
+    Write-Host ('  ' + ($ch * $Width)) -ForegroundColor $Color
+}
+
+# ============================================================
+# Function: Write-Banner — 输出脚本顶部横幅
+# ============================================================
+function Write-Banner {
+    param(
+        [Parameter(Mandatory = $true)][string]$Title,
+        [string]$Subtitle
+    )
+
+    Write-Host ''
+    Write-Rule -Width 58 -Style Double
+    Write-Host ("    " + $Title) -ForegroundColor Cyan
+    if ($Subtitle) { Write-Host ("    " + $Subtitle) -ForegroundColor DarkGray }
+    Write-Rule -Width 58 -Style Double
+}
+
+# ============================================================
+# Function: Write-Stage — 打印阶段分隔标题
+# ============================================================
+function Write-Stage {
+    param(
+        [Parameter(Mandatory = $true)][int]$Number,
+        [Parameter(Mandatory = $true)][string]$Title,
+        [int]$Total = 3
+    )
+
+    Write-Host ''
+    Write-Rule -Width 58
+    Write-Host ("   阶段 $Number/$Total  ·  $Title") -ForegroundColor Cyan
 }
 
 # ============================================================
@@ -381,9 +429,7 @@ function Get-RepoArchiveFromRelease {
 # ============================================================
 
 # 不清屏，直接在当前命令行输出
-Write-Host '==========================================' -ForegroundColor Cyan
-Write-Host ' OpenCpolarSync 一键部署向导' -ForegroundColor Cyan
-Write-Host '==========================================' -ForegroundColor Cyan
+Write-Banner -Title 'OpenCpolarSync  ·  一键部署' -Subtitle 'Cpolar 隧道监控  ·  Openlist 服务守护  ·  Watchdog 保活'
 
 # --- 操作选择：安装 / 卸载 ---------------------------------------------------
 $action = $null
@@ -393,11 +439,11 @@ if ($Uninstall) {
     $action = 'install'
 } else {
     Write-Host ''
-    Write-Host '  请选择操作：' -ForegroundColor White
-    Write-Host '    1. 安装 / 更新 OpenCpolarSync' -ForegroundColor White
-    Write-Host '    2. 卸载 OpenCpolarSync' -ForegroundColor White
+    Write-Host '   请选择操作：' -ForegroundColor White
+    Write-Host '     1. 安装 / 更新 OpenCpolarSync' -ForegroundColor White
+    Write-Host '     2. 卸载 OpenCpolarSync' -ForegroundColor White
     Write-Host ''
-    $choice = Read-Host '请输入序号 (1/2) [默认 1]'
+    $choice = Read-Host '   请输入序号 (1/2) [默认 1]'
     if ($choice -eq '2') {
         $action = 'uninstall'
     } else {
@@ -408,7 +454,8 @@ if ($Uninstall) {
 # --- 卸载分支：直接调用卸载脚本并退出 ----------------------------------------
 if ($action -eq 'uninstall') {
     Write-Host ''
-    Write-Host '--- 卸载模式 ---' -ForegroundColor Cyan
+    Write-Rule -Width 58
+    Write-Host '   卸载 OpenCpolarSync' -ForegroundColor Cyan
 
     if (-not $InstallDir) {
         $InstallDir = Join-Path $env:LOCALAPPDATA 'OpenCpolarSync'
@@ -453,7 +500,7 @@ if ($DryRun) {
 
 # --- 阶段 1：获取仓库文件 ---------------------------------------------------
 Write-Host ''
-Write-Host '--- 阶段 1：获取程序文件 ---' -ForegroundColor Cyan
+Write-Stage -Number 1 -Title '获取程序文件'
 
 # 缓存/已安装检测：app 目录已有 setup.ps1 时默认跳过下载与解压，避免每次重复下载几十 MB
 $skipFetch = (-not $DryRun) -and (-not $Force) -and (Test-Path (Join-Path $appDir 'setup.ps1'))
@@ -530,7 +577,7 @@ if ($skipFetch) {
 
 # --- 阶段 2：解压 -------------------------------------------------------------
 Write-Host ''
-Write-Host '--- 阶段 2：解压程序文件 ---' -ForegroundColor Cyan
+Write-Stage -Number 2 -Title '解压程序文件'
 
 if (-not $DryRun -and -not $skipFetch) {
     if (-not (Test-Path $appDir)) {
@@ -578,10 +625,12 @@ if (-not $DryRun -and -not (Test-Path $setupPath)) {
 }
 
 Write-Host ''
-Write-Host '--- 阶段 3：执行部署向导 ---' -ForegroundColor Cyan
+Write-Stage -Number 3 -Title '执行部署向导'
 
 # 组装透传给 setup.ps1 的参数；引导器已把整个流程提权，这里在同一窗口直接调用 setup
 $setupParams = @{}
+# 引导器已经问过「安装 / 卸载」，让 setup.ps1 跳过它的操作菜单，避免重复询问
+$setupParams['NoMenu'] = $true
 if ($WebhookUrl)       { $setupParams['WebhookUrl'] = $WebhookUrl }
 if ($CpolarUser)       { $setupParams['CpolarUser'] = $CpolarUser }
 if ($CpolarPassword)   { $setupParams['CpolarPassword'] = $CpolarPassword }
@@ -606,25 +655,27 @@ Write-Log 'OK' '部署向导已结束'
 try {
     $primaryConfig = Join-Path $configDir 'config.json'
     Write-Host ''
-    Write-Host '================ 部署结果摘要 ================' -ForegroundColor Cyan
-    Write-Host ("  程序目录： " + $appDir)
-    Write-Host ("  配置目录： " + $configDir)
+    Write-Rule -Width 58 -Style Double
+    Write-Host '   部署结果摘要' -ForegroundColor Cyan
+    Write-Rule -Width 58 -Style Double
+    Write-Host ("   程序目录    " + $appDir)
+    Write-Host ("   配置目录    " + $configDir)
     if (Test-Path $primaryConfig) {
         $cfg = Get-Content $primaryConfig -Raw -Encoding UTF8 | ConvertFrom-Json
         $wh  = if ($cfg.webhookUrl) { '已配置（钉钉告警已开启）' } else { '未配置（无钉钉告警）' }
-        $tun = if ($cfg.selectedTunnelNames) { (@($cfg.selectedTunnelNames) -join ', ') } else { '未配置' }
-        Write-Host ("  钉钉告警： " + $wh)
-        Write-Host ("  监控隧道： " + $tun)
-        Write-Host ("  轮询间隔： " + $cfg.interval + " 分钟")
+        $tun = if ($cfg.selectedTunnelNames) { (@($cfg.selectedTunnelNames) -join ', ') } else { '未配置（可在配置文件中补充）' }
+        Write-Host ("   钉钉告警    " + $wh)
+        Write-Host ("   监控隧道    " + $tun)
+        Write-Host ("   轮询间隔    " + $cfg.interval + " 分钟")
     } else {
-        Write-Host '  配置文件： 未找到'
+        Write-Host '   配置文件    未找到'
     }
     $ol = Get-Process openlist -ErrorAction SilentlyContinue
-    $cp = Get-Process cpolar -ErrorAction SilentlyContinue
-    Write-Host ("  Openlist： " + $(if ($ol) { '运行中 (PID=' + $ol[0].Id + ')' } else { '未运行' }))
-    Write-Host ("  Cpolar：   " + $(if ($cp) { '运行中 (PID=' + $cp[0].Id + ')' } else { '未运行' }))
-    Write-Host '=============================================' -ForegroundColor Cyan
-    Write-Host '  提示：配置保存在上面的“配置目录”，升级不会丢失；重新运行本向导可修改设置。' -ForegroundColor Gray
+    $cp = Get-Process cpolar   -ErrorAction SilentlyContinue
+    Write-Host ("   Openlist    " + $(if ($ol) { '运行中（PID=' + $ol[0].Id + '）' } else { '未运行' }))
+    Write-Host ("   Cpolar      " + $(if ($cp) { '运行中（PID=' + $cp[0].Id + '）' } else { '未运行' }))
+    Write-Rule -Width 58 -Style Double
+    Write-Host '   提示：配置保存在上面的「配置目录」，升级不会丢失；重新运行本向导可修改设置。' -ForegroundColor DarkGray
 } catch {
     Write-Log 'WARN' "读取部署摘要失败：$($_.Exception.Message)"
 }
