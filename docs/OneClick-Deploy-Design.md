@@ -272,7 +272,7 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 
 发布后真实环境（用户在国内网络）暴露两个问题，已修复：
 
-1. **一行命令下载源不稳定（DNS / 镜像拦截）**：用户国内网络下远程源直连不稳定。修复：README 以 **Gitee 主源** 作为一行命令；`bootstrap.ps1` 下载仓库 zip 以 **Gitee Release 资产优先、Gitee 分支归档回退**（`irm \| iex` 无法传 `-Source` 参数，故必须在脚本内自动降级）。
+1. **一行命令下载源不稳定（DNS / 镜像拦截）**：用户国内网络下远程源直连不稳定。修复：README 以 **Gitee 主源** 作为一行命令；`bootstrap.ps1` 下载仓库 zip 以 **Gitee Release 资产优先、Gitee 分支归档回退**（`irm \| iex` 无法传 `-Source` 参数，故必须在脚本内自动降级）。> 分发策略后续已在 **6.5** 修订：Gitee 源码归档对匿名请求不可用，实际只有 Release 资产一条通道。
 2. **`iex` 解析失败（BOM 导致，早期结论已修正）**：原 `bootstrap.ps1` 带 BOM 且开头是 `<#` 注释块，经 `irm \| iex` 后注释块失效。修复：移除 BOM（见 6.1 的早期处理）。
 3. **`Expand-Archive` 解压阶段崩溃「找不到中央目录结尾记录」**：用户在国内网络下远程源不可用 → 回退时，镜像返回 **HTTP 200 的 HTML 登录/拦截页（约 40KB）**，被当成 zip 下载，解压即崩。修复：`Get-RepoArchive` 下载后做**两道前置校验**——(a) 响应 `Content-Type` 为 `text/html` 直接抛「返回内容类型为 HTML」并提示登录页/错误页；(b) `Test-ZipFile` 校验 **ZIP 魔数（PK）+ 可打开完整性**，魔数不符抛「不是有效的 ZIP 压缩包」；两者均在 `Expand-Archive` 之前拦截，使「所有来源失败」能优雅回退并给出排查建议（离线 Local / git clone Gitee + setup.ps1 / 手动 zip）。`Get-RepoArchive` 还新增 **`-TimeoutSec 45`**，避免镜像卡死导致用户以为 PowerShell 无响应直接退出。`Test-ZipFile` 仅以魔数为硬门槛、完整性打开为尽力而为（不误杀合法 zip），并**移除了原先 `-lt 1024` 的长度门槛**（会误杀合法的小体积 zip，属 false negative）。已用自测脚本在 **PowerShell 5.1 与 7.x** 下覆盖：DryRun 列出两源、真 zip 解压成功、本地假 HTML 被拒、镜像返回 HTML 在下载阶段拦截、镜像返回非 ZIP 被拒——全部 PASS。
 
@@ -312,9 +312,53 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 1. **删除** `ServerCertificateValidationCallback = { $true }`（全局关证书校验既有副作用又有安全风险）。
 2. 保留显式 `Tls12`（PS 5.1 默认仅 Ssl3|Tls，连不上要求 TLS1.2+ 的 CDN，这个是有必要的），但改为更明确的 `[System.Net.SecurityProtocolType]::Tls12` 直接赋值。
 
-**实测**：删除回调后，真实下载 Gitee 归档成功（TLS 握手通过，不再报「基础连接已经关闭」）；沙箱访问 Gitee 返回 HTML 登录页，两层防护（`Content-Type=text/html` 拦截 + ZIP 魔数校验）均正常识别并会回退。用户本机可正常拿到真 zip。
+**实测**：删除回调后，TLS 握手通过，不再报「基础连接已经关闭」；两层防护（`Content-Type=text/html` 拦截 + ZIP 魔数校验）均正常识别并回退。
+
+> **⚠️ 后修订（见 6.5）**：本节当时把 Gitee 返回的 HTML 登录页判为「沙箱特有现象」，并推断「用户本机可正常拿到真 zip」——**该推断已被真实用户环境证伪**。Gitee 对匿名请求**一律**返回登录页而非源码归档，与本机/沙箱无关。两层防护确实正确拦截并回退，但当时并不存在「能成功回退的真实源」，所以一行命令实际不可用。详见 6.5。
 
 **教训**：`ServerCertificateValidationCallback` 这类 AppDomain 级全局设置不要轻易在脚本里设置；「放宽证书校验」的初衷（绕开 CRYPT_E_NO_REVOCATION_CHECK）应交给环境本身处理（如 `git -c http.schannelCheckRevoke=false` 仅针对 git，而非全局回调）。
+
+### 6.5 一行命令在 Gitee 上必失败的真实根因与修复（发布包资产化）
+
+**触发**：用户在真机执行 README 的一行命令，两条来源连续失败：
+
+```text
+[WARN] Release 下载失败：Gitee Release 未提供可下载的 zip
+[WARN] Gitee 下载失败：下载内容不是有效的 ZIP 压缩包（魔数或完整性校验失败），来源可能返回了登录页或错误页
+[ERROR] 所有来源均下载失败或返回了无效的压缩包
+```
+
+**根因（两点叠加）**：
+
+1. **Gitee 对匿名请求不返回仓库源码归档。** 逐字节实测（匿名、无 Cookie、本机直连）：
+
+   | 端点 | 结果 |
+   |------|------|
+   | `/repository/archive/main.zip` | HTTP 200，**46231 字节 HTML**（魔数 `3C 21` = `<!`，含「登录／验证」字样），**不是 zip** |
+   | `/archive/refs/heads/main.zip` | 404 |
+   | `/archive/refs/tags/v1.1.15.zip` | HTML（同上） |
+   | `/repository/archive/main.tar.gz` | HTML |
+   | `/releases/download/<tag>/bootstrap.ps1` | ✅ 正常返回脚本本体（2132 B） |
+   | `/raw/main/bootstrap-core.ps1` | ✅ 正常返回 |
+   | `/raw/main/Openlist/archive/openlist.zip`（71 MB） | ❌ 403 Forbidden |
+   | `/raw/main/Cpolar/installer/cpolar_amd64.msi`（8 MB） | ✅ 正常返回 |
+
+   结论：**Gitee 唯一可靠的匿名分发通道是 Release 资产（经 `foruda.gitee.com` CDN）**；源码归档接口与「大文件 raw」都不可匿名获取。这也解释了 6.4 中的 HTML 现象——它并非沙箱特有。
+
+2. **Release 里从来没有发布包。** 原 `build_release_zip.ps1` 依赖 `Cpolar/config/config.json`，而该文件被 `.gitignore` 忽略（仓库里只有 `config.example.json`），构建**必然抛异常**；`publish_gitee_release.ps1` 又把它包在 `try/catch` 里「构建失败就只传两个 ps1」，于是 Release 只有 `bootstrap.ps1` / `bootstrap-core.ps1`，外加 Gitee 自动挂载的源码归档（同样是匿名拿不到的 HTML 链接）。两个下载策略因此全部落空。
+
+**修复**：
+
+1. `build_release_zip.ps1` 改用 **`git archive HEAD`** 打包全部受版本控制文件——补齐原手工清单缺失的 Guard / 卸载脚本，天然排除 `.git` 与被忽略的 `config.json`；产物含 `OpenCpolarSync-<Tag>/` 顶层目录（与解压提层逻辑一致），并新增 ZIP 魔数校验。产物约 **75 MB**（含 `openlist.zip` 71 MB + `cpolar_amd64.msi` 8 MB）。
+2. `publish_gitee_release.ps1` 把构建改为**快速失败**（杜绝再发出缺少发布包的残缺 Release）；附件去重改用 **`/attach_files`** 端点取 `id`（Release 对象的 `assets` 数组不含 `id`）。
+3. `bootstrap-core.ps1` 的 `Get-RepoArchiveFromRelease` **只认手工上传的 `OpenCpolarSync*.zip`**，显式排除 `/archive/` 源码归档链接；并同步修正失败排查提示。
+
+**实测验证（匿名、无登录）**：`releases/latest` 返回 `OpenCpolarSync_v1.1.15.zip`；直接 GET 该资产 → **HTTP 200 / `Content-Type: application/zip` / `Content-Length: 78898214` / 魔数 `50 4B 03 04`**。一行命令链路恢复。
+
+**踩坑记录（PowerShell 7 特有）**：`Invoke-RestMethod` 在 PS7 下把 JSON 数组**当作单个对象**返回，`@(Invoke-RestMethod ...)` 会把它**再包一层**；此时管道给 `Where-Object`，整个数组作为一项传入，而「对数组取属性」会返回**属性值数组**，`-eq` / `-like` 因此**误判为匹配**——`$dup.id` 插值出 `"3215277 3215431"`，URL 变成 `.../attach_files/3215277 3215431` → **HTTP 404**。修复：一律用 `foreach ($x in $resp)` 逐项展开，不用管道 `Where-Object`（同一隐患已在 `Get-RepoArchiveFromRelease` 的资产检索里一并修掉）。
+
+**发布新版检查清单**：改完代码 → `build_release_zip.ps1 -Tag vX.Y.Z` 本地构建 → `publish_gitee_release.ps1 -Tag vX.Y.Z` 上传（**必须成功**，脚本已改为快速失败）→ 匿名验证 `releases/latest` 能取到并下载 `OpenCpolarSync_vX.Y.Z.zip`。
+
 
 ---
 
@@ -323,7 +367,7 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 | # | 事项 | 说明 |
 |---|------|------|
 | 1 | **Openlist 存储挂载仍为人工** | 挂载配置存于 openlist 自身数据库，跨版本格式不稳，强写易碎。当前只做「打开 Web + 步骤清单 + 隧道校验」引导 |
-| 2 | **Gitee 主源访问** | 已全面迁移至 Gitee：`bootstrap.ps1` 默认 Gitee，下载以 Gitee Release 资产优先、Gitee 分支归档回退，国内一行命令无需手动追加参数 |
+| 2 | **Gitee 主源访问** | 已全面迁移至 Gitee。分发通道为 **Gitee Release 资产**（唯一可匿名访问）：`bootstrap.ps1` 从 Release 资产取 `bootstrap-core.ps1`，再由其从 `releases/latest` 取 `OpenCpolarSync*.zip` 发布包。⚠️ Gitee **源码归档接口对匿名请求返回登录页 HTML**，不能作为下载源（见 6.5）；发布新版必须执行 `publish_gitee_release.ps1` 上传发布包，否则一行命令必然失败 |
 | 3 | **cpolar.yml 字段需实机验证** | 隧道 yml 的写法依据 `cpolar --help` 推导，建议在真机首次运行后确认隧道能正常建立 |
 | 4 | **CpolarGuard.ps1 编码** | 保持原有 BOM + CRLF（避免 1109 行全量 diff）；新增脚本统一 BOM + LF。如需全仓库统一换行，建议单独一次提交处理 |
 
