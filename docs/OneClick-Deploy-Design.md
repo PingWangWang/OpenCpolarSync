@@ -377,6 +377,41 @@ Windows PowerShell 5.1 是 Windows 系统预装版本，是绝大多数用户的
 
 **验证**：用真实 `Invoke-WebDownload` 抓取进度帧，确认为同一行内的 `\r` 覆盖刷新且带空格补齐（`<CR>…13%…<CR>…100% 完成␠␠␠␠␠␠`）；真实链路 `bootstrap-core.ps1 -NoSetup` 端到端仍 `SCRIPT_RC=0`（下载 75.25 MB + 解压 26 文件）。
 
+### 6.7 桌面「配置向导」快捷方式
+
+**需求**：部署完成后在桌面放一个快捷方式，用户以后**双击即可重新打开配置向导**，不必再记/敲 `irm ... | iex` 那一行命令。
+
+**实现**：`setup.ps1` 新增 `New-DesktopShortcut`，主流程加「**阶段 7：桌面快捷方式**」。
+
+| 项 | 取值 |
+|---|---|
+| 目标 | `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`（绝对路径，不继承 PATH 里的 pwsh） |
+| 参数 | `-NoProfile -ExecutionPolicy Bypass -NoExit -File "<RootDir>\setup.ps1"` |
+| 起始位置 | `$RootDir`（部署后即 `%LOCALAPPDATA%\OpenCpolarSync\app`） |
+| 名称 | `OpenCpolarSync 配置向导.lnk` |
+| 图标 | `%SystemRoot%\System32\shell32.dll,13` |
+
+**关键点：必须带「以管理员身份运行」。** 向导要安装 msi、注册计划任务，都需要管理员权限；不带该标志时双击会因权限不足失败，或由向导自身再弹一次 UAC 并另开一个窗口。该标志位在 `.lnk` 头 `LinkFlags` 的 **RunAsUser（0x00002000）**，即第 **0x15** 字节的 **bit5（0x20）**——`WScript.Shell` 没有对应属性，所以只能创建后回写这一个字节：
+
+```powershell
+$bytes = [System.IO.File]::ReadAllBytes($lnkPath)
+$bytes[0x15] = $bytes[0x15] -bor 0x20
+[System.IO.File]::WriteAllBytes($lnkPath, $bytes)
+```
+
+其他细节：
+
+- `-NoExit`：让向导末尾的人工检查清单留在窗口里可读；关窗即结束。
+- 桌面路径统一走 `Get-SpecialFolder -VariableName 'Desktop'`（优先 `Env:Desktop`，回退 `[Environment]::GetFolderPath('Desktop')`），兼容 OneDrive 重定向桌面。
+- 创建失败只告警、**不阻断部署**；`-SkipShortcut` 可跳过。
+- `Show-FinalChecklist` 只在 `.lnk` 确实存在时才提示「双击桌面快捷方式」，避免 `-SkipShortcut` / 创建失败时误导用户。
+
+**卸载**：`uninstall.ps1` 新增「阶段 4：桌面快捷方式」（原阶段 4/5 顺延为 5/6），删除同名 `.lnk`。
+
+**验证**：`setup.ps1 -DryRun -Silent -NoElevate -NoBrowser` 正确输出阶段 7 计划（含目标 `setup.ps1` 路径），全阶段无异常。
+
+> ⚠️ 未验证项：`.lnk` 的实际创建依赖 `WScript.Shell` COM，本次在受限沙箱内无法执行（COM 实例化被安全策略拦截）。字节偏移 0x15 / 0x20 是通用做法，但**建议真机首次部署后双击确认一次**（应弹出 UAC 并进入配置向导）。
+
 
 ---
 

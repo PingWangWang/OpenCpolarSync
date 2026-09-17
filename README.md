@@ -42,6 +42,10 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 
 选 `1` 即可进入安装向导，按提示输入配置即可。
 
+> 💡 部署完成后会自动在**桌面**创建「**OpenCpolarSync 配置向导**」快捷方式（已带「以管理员身份运行」标志）。
+> 以后要改配置，**双击它即可**重新打开向导，不必再执行上面的命令。
+> 不需要可用 `-SkipShortcut` 跳过创建。
+
 **备用方式（Gitee raw 直链）：**
 
 ```powershell
@@ -62,8 +66,9 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 1. 停止 openlist / cpolar 进程及守护进程
 2. 移除 Watchdog 计划任务
 3. 删除程序目录（自动重试，应对文件被占用）
-4. 可选删除配置文件（含密码、Webhook 等）
-5. 可选卸载 Cpolar 客户端
+4. 删除桌面「OpenCpolarSync 配置向导」快捷方式
+5. 可选删除配置文件（含密码、Webhook 等）
+6. 可选卸载 Cpolar 客户端
 
 ### 强制更新（重新下载程序文件）
 
@@ -117,6 +122,7 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 | `-SkipOpenlist` | 跳过 openlist 部署 |
 | `-SkipTunnel` | 跳过 Cpolar 隧道配置 |
 | `-SkipWatchdog` | 跳过 Watchdog 计划任务注册 |
+| `-SkipShortcut` | 跳过在桌面创建「配置向导」快捷方式 |
 | `-DryRun` | 演练模式 |
 
 ### 无人值守部署示例
@@ -144,6 +150,10 @@ irm https://gitee.com/pingwang1994/OpenCpolarSync/releases/download/v1.1.15/boot
 | 4 | 生成 config.json 并持久化到用户目录（升级不丢失） |
 | 5 | 写入 cpolar.yml 隧道配置 |
 | 6 | 注册 Watchdog S4U 计划任务，拉起两个守护进程 |
+| 7 | 在桌面创建「OpenCpolarSync 配置向导」快捷方式（以管理员身份运行） |
+
+> 阶段 7 的快捷方式是后续**改配置的入口**：双击即可重新运行本向导（会载入现有配置作为默认值）。
+> 卸载时由 `uninstall.ps1` 一并删除。
 
 ### 仍需手动完成的一步
 

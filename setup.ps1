@@ -8,7 +8,8 @@
       3. 交互式收集配置并生成 config.json（持久化到用户目录，升级不丢失）
       4. 配置 Cpolar 内网穿透隧道（写入 cpolar.yml 并注册 authtoken）
       5. 注册 Watchdog 计划任务（S4U）并立即拉起 Cpolar / Openlist 两个 Guard
-      6. 打开 Openlist Web 引导完成存储挂载（当前唯一需人工介入的步骤）
+      6. 在桌面创建「配置向导」快捷方式（以管理员身份运行）——以后双击即可重开本向导
+      7. 打开 Openlist Web 引导完成存储挂载（当前唯一需人工介入的步骤）
 
     设计上遵循「配置与程序分离」：config.json 的主副本存放在
     %LOCALAPPDATA%\OpenCpolarSync\config，每次运行都会同步一份到仓库的
@@ -49,6 +50,8 @@
     跳过 Watchdog 计划任务注册。
 .PARAMETER NoBrowser
     不自动打开浏览器引导页面。
+.PARAMETER SkipShortcut
+    跳过在桌面创建「配置向导」快捷方式。
 .PARAMETER NoElevate
     禁止自动请求管理员提权（供自测或已具备权限的场景使用）。
 .EXAMPLE
@@ -88,6 +91,7 @@ param(
     [switch]$SkipTunnel,
     [switch]$SkipWatchdog,
     [switch]$NoBrowser,
+    [switch]$SkipShortcut,
     [switch]$NoElevate
 )
 
@@ -678,6 +682,67 @@ function Register-WatchdogTasks {
 }
 
 # ============================================================
+# Function: New-DesktopShortcut — 在桌面创建「配置向导」快捷方式
+# 部署完成后在桌面放一个快捷方式，用户以后双击即可重新打开本向导，
+# 不必再记/敲那一行 irm 命令。
+#
+# 为什么快捷方式要带「以管理员身份运行」：本向导需要安装 msi、注册计划任务，
+# 都要求管理员权限。不带该标志的话，双击后要么因权限不足失败，要么由脚本自身
+# 再弹一次 UAC 并另开一个窗口；带上后双击即弹 UAC、在原窗口内直接以管理员运行。
+# 该标志位在 .lnk 头 LinkFlags 的 RunAsUser（0x00002000），即第 0x15 字节的
+# bit5（0x20）——WScript.Shell 没有对应属性，只能创建后回写这一个字节。
+#
+# 创建失败不影响部署（返回 $false 并给出警告）。
+# ============================================================
+function New-DesktopShortcut {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetScript,
+        [string]$Name = 'OpenCpolarSync 配置向导'
+    )
+
+    $desktop = Get-SpecialFolder -VariableName 'Desktop' -FolderName 'Desktop'
+    if (-not $desktop -or -not (Test-Path $desktop)) {
+        Write-Log 'WARN' '未找到桌面目录，跳过创建快捷方式'
+        return $false
+    }
+
+    $lnkPath = Join-Path $desktop ($Name + '.lnk')
+
+    # 优先用 Windows PowerShell 5.1 的绝对路径，确保不继承 PATH 里的 pwsh/换行策略
+    $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path $psExe)) { $psExe = 'powershell.exe' }
+
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $sc = $shell.CreateShortcut($lnkPath)
+        $sc.TargetPath       = $psExe
+        # -NoExit：向导最后有一段人工检查清单，保留窗口便于阅读；关窗即结束
+        $sc.Arguments        = '-NoProfile -ExecutionPolicy Bypass -NoExit -File "' + $TargetScript + '"'
+        $sc.WorkingDirectory = (Split-Path -Parent $TargetScript)
+        $sc.Description      = 'OpenCpolarSync 配置向导 — 双击重新配置（以管理员身份运行）'
+        $iconDll = Join-Path $env:SystemRoot 'System32\shell32.dll'
+        if (Test-Path $iconDll) { $sc.IconLocation = "$iconDll,13" }
+        $sc.Save()
+        try { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell) } catch { }
+
+        # 回写 RunAsUser 位（见上方说明）：让双击直接触发 UAC 提权
+        if (Test-Path $lnkPath) {
+            $bytes = [System.IO.File]::ReadAllBytes($lnkPath)
+            if ($bytes.Length -gt 0x15) {
+                $bytes[0x15] = $bytes[0x15] -bor 0x20
+                [System.IO.File]::WriteAllBytes($lnkPath, $bytes)
+            }
+        }
+
+        Write-Log 'OK' "已在桌面创建快捷方式：$Name"
+        return $true
+    } catch {
+        Write-Log 'WARN' "创建桌面快捷方式失败（不影响使用）：$($_.Exception.Message)"
+        return $false
+    }
+}
+
+# ============================================================
 # Function: Show-FinalChecklist — 输出收尾引导与人工检查清单
 # Openlist 的存储挂载依赖其自身数据库，跨版本格式不稳，因此这里
 # 只做引导与校验，不自动写入，避免产生易碎的强耦合逻辑。
@@ -700,6 +765,12 @@ function Show-FinalChecklist {
     Write-Host '3. 回到 Cpolar Web（http://localhost:9200）确认以下隧道已在线：' -ForegroundColor White
     foreach ($t in $Tunnels) { Write-Host "   - $t" -ForegroundColor Gray }
     Write-Host ''
+    # 只有快捷方式确实存在时才提示，避免 -SkipShortcut / 创建失败时误导用户
+    $scPath = Join-Path (Get-SpecialFolder -VariableName 'Desktop' -FolderName 'Desktop') 'OpenCpolarSync 配置向导.lnk'
+    if (Test-Path $scPath) {
+        Write-Host '以后想改配置：双击桌面上的「OpenCpolarSync 配置向导」即可，无需再执行命令。' -ForegroundColor White
+        Write-Host ''
+    }
     Write-Host "配置文件位置：$PrimaryConfigPath" -ForegroundColor Gray
     Write-Host '后续修改配置后无需重装，Guard 会在下一个轮询周期自动热加载。' -ForegroundColor Gray
 
@@ -840,6 +911,19 @@ if ($SkipWatchdog) {
     Write-Log 'INFO' '已指定 -SkipWatchdog，跳过计划任务注册'
 } else {
     [void](Register-WatchdogTasks -ManagerPath $managerPath)
+}
+
+# --- 阶段 7：桌面快捷方式 --------------------------------------
+Write-Stage -Number 7 -Title '桌面快捷方式'
+$setupSelf = Join-Path $RootDir 'setup.ps1'
+if ($SkipShortcut) {
+    Write-Log 'INFO' '已指定 -SkipShortcut，跳过创建桌面快捷方式'
+} elseif ($DryRun) {
+    Write-Log 'DRYRUN' "计划在桌面创建「OpenCpolarSync 配置向导」快捷方式（以管理员身份运行，指向 $setupSelf）"
+} elseif (-not (Test-Path $setupSelf)) {
+    Write-Log 'WARN' "未找到 setup.ps1（$setupSelf），跳过创建快捷方式"
+} else {
+    [void](New-DesktopShortcut -TargetScript $setupSelf)
 }
 
 # --- 收尾引导 -------------------------------------------------

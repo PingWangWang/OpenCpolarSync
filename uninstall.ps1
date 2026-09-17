@@ -6,9 +6,10 @@
       1. 停止 Cpolar / Openlist 进程及 Guard 守护进程
       2. 调用 WatchdogManager.bat teardown all 移除计划任务
       3. 删除程序目录 %LOCALAPPDATA%\OpenCpolarSync\app
-      4. 可选：删除配置目录 %LOCALAPPDATA%\OpenCpolarSync\config
-      5. 可选：删除 Cpolar 隧道配置 %USERPROFILE%\.cpolar\cpolar.yml
-      6. 可选：卸载 Cpolar 客户端（仅当通过本工具安装时）
+      4. 删除桌面「OpenCpolarSync 配置向导」快捷方式
+      5. 可选：删除配置目录 %LOCALAPPDATA%\OpenCpolarSync\config
+      6. 可选：删除 Cpolar 隧道配置 %USERPROFILE%\.cpolar\cpolar.yml
+      7. 可选：卸载 Cpolar 客户端（仅当通过本工具安装时）
 .PARAMETER Silent
     非交互模式，全部使用默认行为（保留配置、不卸载 Cpolar）。
 .PARAMETER RemoveConfig
@@ -214,9 +215,28 @@ if (Test-Path $appDir) {
     Write-Log 'INFO' '程序目录不存在，跳过'
 }
 
-# --- 阶段 4：配置目录（可选） -------------------------------------------------
+# --- 阶段 4：桌面快捷方式 -----------------------------------------------------
 Write-Host ''
-Write-Host '--- 阶段 4：配置文件 ---' -ForegroundColor Cyan
+Write-Host '--- 阶段 4：桌面快捷方式 ---' -ForegroundColor Cyan
+
+# 名称需与 setup.ps1 中 New-DesktopShortcut 的 $Name 保持一致
+$desktopPath  = [Environment]::GetFolderPath('Desktop')
+$shortcutPath = if ($desktopPath) { Join-Path $desktopPath 'OpenCpolarSync 配置向导.lnk' } else { $null }
+if ($shortcutPath -and (Test-Path $shortcutPath)) {
+    Write-Log 'STEP' "删除桌面快捷方式：$shortcutPath"
+    Remove-Item -Path $shortcutPath -Force -ErrorAction SilentlyContinue
+    if (Test-Path $shortcutPath) {
+        Write-Log 'WARN' '桌面快捷方式删除失败（可能被占用），可稍后手动删除'
+    } else {
+        Write-Log 'OK' '桌面快捷方式已删除'
+    }
+} else {
+    Write-Log 'INFO' '未发现桌面快捷方式，跳过'
+}
+
+# --- 阶段 5：配置目录（可选） -------------------------------------------------
+Write-Host ''
+Write-Host '--- 阶段 5：配置文件 ---' -ForegroundColor Cyan
 
 $doRemoveConfig = if ($Silent) { $RemoveConfig.IsPresent } else { Confirm-Action -Message '是否删除配置文件（config.json、钉钉Webhook、密码等）' -Default $false }
 
@@ -237,9 +257,9 @@ if ($doRemoveConfig) {
     Write-Log 'INFO' "配置目录已保留：$configDir"
 }
 
-# --- 阶段 5：卸载 Cpolar（可选） ----------------------------------------------
+# --- 阶段 6：卸载 Cpolar（可选） ----------------------------------------------
 Write-Host ''
-Write-Host '--- 阶段 5：Cpolar 客户端 ---' -ForegroundColor Cyan
+Write-Host '--- 阶段 6：Cpolar 客户端 ---' -ForegroundColor Cyan
 
 $cpolarInstalled = $false
 try {
