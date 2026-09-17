@@ -115,8 +115,10 @@ function Write-Log {
 
 # ============================================================
 # Function: Resolve-ArchiveUrl — 按来源解析仓库归档地址
-# 提供 Gitee 仓库归档作为唯一远程下载源（项目主源托管于 Gitee）。
-# 下载失败时使用 -RepoUrl 自定义归档地址，或用 -Source Local 走本地离线归档。
+# 说明：Gitee 的分支源码归档接口（/repository/archive/<branch>.zip）对匿名请求会返回
+# 登录页 HTML 而非 zip，因此它只是「Release 资产失败后」的最后兜底尝试，通常不会成功。
+# 真正可靠的分发通道是 Release 资产（见 Get-RepoArchiveFromRelease）；也可用 -RepoUrl
+# 指定自定义归档地址，或用 -Source Local 走本地离线归档。
 # ============================================================
 function Resolve-ArchiveUrl {
     param(
@@ -264,9 +266,11 @@ function Get-RepoArchive {
 }
 
 # ============================================================
-# Function: Get-RepoArchiveFromRelease — 优先从 Gitee Release API 下载
-# 用 releases/latest 拿 zipball_url 或资产 browser_download_url，再下载。
-# 仓库必须在 Gitee 发布过 Release 并附资产，否则该源失败并由外层回退到 Gitee 分支归档。
+# Function: Get-RepoArchiveFromRelease — 从 Gitee Release API 下载发布包
+# 用 releases/latest 找到手工上传的发布包资产（OpenCpolarSync*.zip）再下载。
+# 这是 Gitee 上唯一可匿名访问的分发通道：Gitee 的源码归档接口对未登录请求只返回
+# 登录页 HTML，Release 资产才经 CDN 匿名下发。仓库未发布含该资产的 Release 时本
+# 源失败，由外层回退到 Gitee 分支归档（通常同样失败，故会给出离线部署指引）。
 # ============================================================
 function Get-RepoArchiveFromRelease {
     param(
@@ -279,21 +283,31 @@ function Get-RepoArchiveFromRelease {
 
     try {
         $latest = Invoke-RestMethod -Uri "https://gitee.com/api/v5/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'OpenCpolarSync' } -TimeoutSec 20
-        # 优先使用已发布的资产 zip（Gitee Release 附件，稳定）；
-        # 没有资产时回退到 Gitee 自动生成的源码 zipball。
-        $asset = @($latest.assets) | Where-Object { $_.name -like 'OpenCpolarSync*.zip' } | Select-Object -First 1
-        if ($asset -and $asset.browser_download_url) {
-            Write-Log 'STEP' "正在下载（Gitee Release 资产）：$($asset.name)"
-        } else {
-            $asset = $null
-            Write-Log 'STEP' "未找到 Release 资产，回退下载源码 zipball：$($latest.zipball_url)"
+
+        # 只认「手工上传的发布包」资产（OpenCpolarSync*.zip）。
+        # 必须排除 Gitee 自动挂到 Release 上的源码归档（browser_download_url 形如
+        # .../archive/refs/...）：该地址对匿名请求返回的是登录页 HTML 而不是 zip，
+        # 若误取会在后面的 ZIP 校验处失败，报出与真实原因不符的错误。
+        # 逐项 foreach 匹配，而不是管道 Where-Object：PowerShell 7 下 Invoke-RestMethod 会把
+        # JSON 数组当作「单个对象」返回，若直接管道给 Where-Object，整个数组会作为一项传入，
+        # 而对数组取属性会返回「属性值数组」，使 -like/-eq 误判为匹配。foreach 能稳定逐项判断。
+        $asset = $null
+        foreach ($a in $latest.assets) {
+            if ($a.name -like 'OpenCpolarSync*.zip' -and
+                $a.browser_download_url -and
+                $a.browser_download_url -notmatch '/archive/') {
+                $asset = $a
+                break
+            }
         }
-        $downloadUrl = if ($asset) { $asset.browser_download_url } else { $latest.zipball_url }
-        if (-not $downloadUrl) { throw 'Gitee Release 未提供可下载的 zip' }
+        if (-not $asset) {
+            throw "最新 Release（$($latest.tag_name)）未提供 OpenCpolarSync*.zip 发布包资产，请在 Gitee 发行版中上传发布包"
+        }
+        Write-Log 'STEP' "正在下载（Gitee Release 资产）：$($asset.name)"
 
         # 下载带进度条（Invoke-WebDownload 内部对下载做流式读 + Write-Progress），
         # 发布包可能较大且不同网络速度差异大，超时放宽到 30 分钟。
-        Invoke-WebDownload -Url $downloadUrl -Destination $Destination -Name "下载发布包"
+        Invoke-WebDownload -Url $asset.browser_download_url -Destination $Destination -Name "下载发布包"
 
         if (-not (Test-ZipFile -Path $Destination)) {
             throw 'Release 下载内容不是有效的 ZIP 压缩包'
@@ -444,17 +458,16 @@ if ($skipFetch) {
         Write-Log 'ERROR' '所有来源均下载失败或返回了无效的压缩包'
         Write-Host ''
         Write-Host '排查建议：' -ForegroundColor Yellow
-        Write-Host '  1) 若提示"不是有效的 ZIP / 返回 HTML"，说明镜像源返回了登录页或错误页，' -ForegroundColor Yellow
-        Write-Host '     通常是该仓库为私有或被网络拦截。请改用本地归档离线部署：' -ForegroundColor Yellow
-        Write-Host '     .\bootstrap.ps1 -Source Local -LocalArchivePath "D:\path\to\main.zip"' -ForegroundColor Yellow
+        Write-Host '  1) 若提示"不是有效的 ZIP / 返回了登录页"，通常是 Gitee 对匿名请求不返回源码' -ForegroundColor Yellow
+        Write-Host '     归档（只给登录页 HTML），或该 Release 未上传 OpenCpolarSync*.zip 发布包。' -ForegroundColor Yellow
+        Write-Host '     请到 Gitee 发行版确认已上传发布包资产，或改用本地归档离线部署：' -ForegroundColor Yellow
+        Write-Host '     .\bootstrap.ps1 -Source Local -LocalArchivePath "D:\path\to\OpenCpolarSync_v1.1.15.zip"' -ForegroundColor Yellow
         Write-Host '  2) 或先 clone 再运行（从 Gitee 获取源码）：' -ForegroundColor Yellow
         Write-Host '     git clone https://gitee.com/pingwang1994/OpenCpolarSync.git ; .\setup.ps1' -ForegroundColor Yellow
-        Write-Host '  3) 也可手动下载 zip 后离线部署：' -ForegroundColor Yellow
-        Write-Host '     https://gitee.com/pingwang1994/OpenCpolarSync/repository/archive/main.zip' -ForegroundColor Yellow
-        Write-Host '  4) 若某个来源长时间无响应后 PowerShell 直接退出，通常是该代理/镜像' -ForegroundColor Yellow
-        Write-Host '     在你当前网络下不可用。默认即从 Gitee 下载（多数国内网络最稳）：' -ForegroundColor Yellow
-        Write-Host '     irm https://gitee.com/pingwang1994/OpenCpolarSync/raw/main/bootstrap.ps1 -OutFile $env:TEMP\bootstrap.ps1;' -ForegroundColor Yellow
-        Write-Host '     & $env:TEMP\bootstrap.ps1 -Source Gitee' -ForegroundColor Yellow
+        Write-Host '  3) 也可到 Gitee 发行版页面手动下载发布包后离线部署：' -ForegroundColor Yellow
+        Write-Host '     https://gitee.com/pingwang1994/OpenCpolarSync/releases' -ForegroundColor Yellow
+        Write-Host '  4) 若某个来源长时间无响应后 PowerShell 直接退出，通常是该 CDN 在你当前' -ForegroundColor Yellow
+        Write-Host '     网络下不可用；可稍后重试，或改用上面的本地归档方式。' -ForegroundColor Yellow
         exit 1
     }
 }
